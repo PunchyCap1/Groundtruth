@@ -1,4 +1,5 @@
 mod app;
+mod node_client;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
