@@ -1,6 +1,10 @@
 mod app;
+<<<<<<< HEAD
 mod pipeline;
 mod ui;
+=======
+mod node_client;
+>>>>>>> 92d53ccd88f61fa90ac6fe382ee49afa8f5769ef
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
