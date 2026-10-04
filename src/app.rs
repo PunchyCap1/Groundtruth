@@ -351,19 +351,19 @@ impl App {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let typing = ctx.text_edit_focused();
-        let (undo, redo, save, save_as, open, new) = ctx.input_mut(|i| {
+        let (redo, undo, save_as, save, open, new) = ctx.input_mut(|i| {
             (
-                i.consume_key(Modifiers::COMMAND, Key::Z),
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y),
-                i.consume_key(Modifiers::COMMAND, Key::S),
+                !typing && (i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y)),
+                !typing && i.consume_key(Modifiers::COMMAND, Key::Z),
                 i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::S),
+                i.consume_key(Modifiers::COMMAND, Key::S),
                 i.consume_key(Modifiers::COMMAND, Key::O),
                 i.consume_key(Modifiers::COMMAND, Key::N),
             )
         });
         if redo {
             self.pending = Some(Cmd::Redo);
-        } else if undo && !typing {
+        } else if undo {
             self.pending = Some(Cmd::Undo);
         }
         if save_as {
@@ -392,9 +392,9 @@ impl App {
         let (del, flip, esc, toggle) = ctx.input(|i| {
             (
                 i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
-                i.key_pressed(Key::R),
+                pressed_once(i, Key::R),
                 i.key_pressed(Key::Escape),
-                i.key_pressed(Key::Space),
+                pressed_once(i, Key::Space),
             )
         });
         if let Some(id) = self.editor.selected.clone() {
@@ -417,7 +417,7 @@ impl App {
         // 1–9 drop the matching palette part into the first free spot.
         let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
         for (k, kind) in keys.iter().zip(Kind::ALL) {
-            if ctx.input(|i| i.key_pressed(*k) && i.modifiers.is_none()) {
+            if ctx.input(|i| pressed_once(i, *k)) {
                 match self.circuit.add_anywhere(kind) {
                     Some(id) => self.editor.selected = Some(id),
                     None => self.say(ctx, "The board is full."),
@@ -582,16 +582,19 @@ impl App {
         };
         if let (Some(unit), Some(v)) = (part.kind.unit(), part.value) {
             // Free-typed value with SI suffixes, plus common presets.
-            if self.value_text.0 != part.id {
-                self.value_text = (part.id.clone(), fmt_si(v, unit));
+            let key = format!("{}@{v}", part.id);
+            if self.value_text.0 != key {
+                self.value_text = (key, fmt_si(v, unit));
             }
             ui.horizontal(|ui| {
                 ui.label(RichText::new("value").color(theme::DIM));
                 let r = ui.add(egui::TextEdit::singleline(&mut self.value_text.1).desired_width(90.0).font(FontId::monospace(13.0)));
                 if r.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter)) && r.has_focus() {
-                    match parse_si(&self.value_text.1).filter(|x| *x > 0.0) {
-                        Some(x) => part.value = Some(x),
-                        None => {}
+                    // Only commit real edits: re-parsing the rounded display would change the value.
+                    if self.value_text.1.trim() != fmt_si(v, unit) {
+                        if let Some(x) = parse_si(&self.value_text.1).filter(|x| x.is_finite() && *x > 0.0) {
+                            part.value = Some(x);
+                        }
                     }
                     self.value_text.1 = fmt_si(part.value.unwrap_or(v), unit);
                 }
@@ -741,9 +744,15 @@ impl App {
                 }
             }
             if let Some(fix) = apply {
-                if let Some(p) = self.circuit.part_mut(&fix.part) {
+                if let Some(p) = self.circuit.part(&fix.part) {
+                    let mut legs = p.legs.clone();
                     for (leg, to) in fix.moves {
-                        p.legs[leg] = to;
+                        if let Some(l) = legs.get_mut(leg) {
+                            *l = to;
+                        }
+                    }
+                    if self.circuit.fits(&legs, Some(&fix.part)) {
+                        self.circuit.part_mut(&fix.part).unwrap().legs = legs;
                     }
                 }
             }
@@ -1125,6 +1134,14 @@ fn status(ui: &mut egui::Ui, key: &str, value: &str, color: Color32) {
     ui.spacing_mut().item_spacing.x = 6.0;
     ui.label(RichText::new(value).font(FontId::monospace(11.0)).color(color));
     ui.label(RichText::new(key).font(FontId::monospace(11.0)).color(theme::LOW));
+}
+
+/// True on the initial press of `key` with no modifiers, ignoring key-repeat.
+fn pressed_once(i: &egui::InputState, key: Key) -> bool {
+    i.events.iter().any(|e| {
+        matches!(e, egui::Event::Key { key: k, pressed: true, repeat: false, modifiers, .. }
+            if *k == key && modifiers.is_none())
+    })
 }
 
 fn code_block(ui: &mut egui::Ui, text: &str) {
