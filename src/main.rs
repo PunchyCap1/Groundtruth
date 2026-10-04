@@ -22,7 +22,10 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Self {
         let _ = dotenvy::dotenv();
-        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        // Strip stray spaces, Windows line endings and pasted (smart) quotes, which would
+        // otherwise end up in the API key's HTTP header and fail to send.
+        let clean = |v: String| v.trim_matches(|c: char| c.is_whitespace() || "\"'\u{201C}\u{201D}\u{2018}\u{2019}".contains(c)).to_string();
+        let var = |k: &str| std::env::var(k).ok().map(clean).filter(|v| !v.is_empty());
         Self {
             gemini_api_key: var("GEMINI_API_KEY"),
             gemini_model: var("GEMINI_MODEL").unwrap_or_else(|| GEMINI_MODELS[0].into()),
