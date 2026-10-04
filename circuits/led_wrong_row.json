@@ -1,0 +1,124 @@
+{
+  "name": "LED, wrong row",
+  "description": "R1 ends in row 14 but the LED anode is in row 15.",
+  "grid": {
+    "rows": 30,
+    "parts": [
+      {
+        "id": "P1",
+        "legs": [
+          {
+            "row": 1,
+            "col": "L+"
+          },
+          {
+            "row": 1,
+            "col": "L-"
+          }
+        ]
+      },
+      {
+        "id": "W1",
+        "legs": [
+          {
+            "row": 5,
+            "col": "L+"
+          },
+          {
+            "row": 5,
+            "col": "a"
+          }
+        ]
+      },
+      {
+        "id": "R1",
+        "legs": [
+          {
+            "row": 5,
+            "col": "c"
+          },
+          {
+            "row": 14,
+            "col": "c"
+          }
+        ]
+      },
+      {
+        "id": "LED1",
+        "legs": [
+          {
+            "row": 15,
+            "col": "d"
+          },
+          {
+            "row": 18,
+            "col": "d"
+          }
+        ]
+      },
+      {
+        "id": "W2",
+        "legs": [
+          {
+            "row": 18,
+            "col": "a"
+          },
+          {
+            "row": 18,
+            "col": "L-"
+          }
+        ]
+      }
+    ]
+  },
+  "labels": {
+    "components": [
+      {
+        "id": "P1",
+        "kind": "supply",
+        "value": 5.0,
+        "markings": "5V bench supply",
+        "positive_leg": 0,
+        "confidence": 1.0
+      },
+      {
+        "id": "W1",
+        "kind": "wire",
+        "value": null,
+        "markings": "red jumper",
+        "positive_leg": null,
+        "confidence": 1.0
+      },
+      {
+        "id": "R1",
+        "kind": "resistor",
+        "value": 220.0,
+        "markings": "red red brown gold",
+        "positive_leg": null,
+        "confidence": 1.0
+      },
+      {
+        "id": "LED1",
+        "kind": "led",
+        "value": null,
+        "markings": "red 5mm",
+        "positive_leg": 0,
+        "confidence": 1.0
+      },
+      {
+        "id": "W2",
+        "kind": "wire",
+        "value": null,
+        "markings": "black jumper",
+        "positive_leg": null,
+        "confidence": 1.0
+      }
+    ]
+  },
+  "expect": {
+    "pass": false,
+    "fault_parts": [
+      "LED1"
+    ]
+  }
+}
