@@ -93,3 +93,22 @@ pub fn section(ui: &mut egui::Ui, text: &str) {
 pub fn card(fill: Color32, stroke: Color32) -> egui::Frame {
     egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, stroke)).inner_margin(8)
 }
+
+/// Solid status tag (dark text on a signal color), so FAULT / WARN / PASS read by
+/// shape and fill as well as hue.
+pub fn badge(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
+    egui::Frame::new()
+        .fill(color)
+        .inner_margin(egui::Margin::symmetric(6, 1))
+        .show(ui, |ui| ui.label(egui::RichText::new(text).font(FontId::monospace(11.5)).color(BG).strong()))
+        .response
+}
+
+/// Hollow tag for states that aren't a verdict (empty board, sim not run).
+pub fn badge_outline(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Response {
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, color))
+        .inner_margin(egui::Margin::symmetric(6, 1))
+        .show(ui, |ui| ui.label(egui::RichText::new(text).font(FontId::monospace(11.5)).color(color).strong()))
+        .response
+}

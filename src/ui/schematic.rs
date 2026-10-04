@@ -191,7 +191,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &Circuit, sim: Option<&SimResult>, selec
             let label_at = pos2(bounds.center().x + sym * 0.45, bounds.center().y - 8.0);
             painter.text(label_at, Align2::LEFT_BOTTOM, lines.join(" "), FontId::monospace(11.0), ink);
             if let Some(i) = current {
-                let i = if part.kind == Kind::Battery { -i } else { i };
+                let i = crate::ui::board::shown_current(part.kind, i);
                 painter.text(label_at + vec2(0.0, 4.0), Align2::LEFT_TOP, format!("{:.2} mA", milliamps(i)), FontId::monospace(11.0), theme::ACCENT);
             }
             if flagged.contains(&part.id) {
