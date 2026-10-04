@@ -16,6 +16,9 @@ fn led_model(color: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// Internal resistance of every battery, in ohms. Small enough not to change normal readings.
+const BATTERY_OHMS: f64 = 0.1;
+
 const DIODE_MODEL: &str = ".model D1N4148 D(IS=2.52n RS=0.568 N=1.752 BV=100 IBV=100u)";
 const NPN_MODEL: &str = ".model Q2N3904 NPN(IS=6.734f XTI=3 EG=1.11 VAF=74.03 BF=416.4 NE=1.259 ISE=6.734f IKF=66.78m \
 XTB=1.5 BR=.7371 NC=2 ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p \
@@ -62,7 +65,11 @@ fn build_with(circuit: &Circuit, tran: Option<(&TranState, f64)>) -> Result<Netl
 
         if part.kind == Kind::Battery {
             let v = part.value.unwrap_or(5.0);
-            writeln!(spice, "V_{id} {} {} DC {v}", nets[0], nets[1])?;
+            // A small internal resistance, like a real cell. Without it two batteries in
+            // parallel are two ideal sources fighting, and ngspice cannot solve the circuit.
+            let inner = format!("{}_int", id.to_lowercase());
+            writeln!(spice, "R_{id}_int {} {inner} {BATTERY_OHMS}", nets[0])?;
+            writeln!(spice, "V_{id} {inner} {} DC {v}", nets[1])?;
             nl.ammeters.insert(format!("v_{id}").to_lowercase(), (id.clone(), 0));
             continue;
         }
