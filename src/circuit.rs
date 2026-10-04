@@ -278,7 +278,35 @@ impl Default for Circuit {
 impl Circuit {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+        let c: Circuit = serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        c.validate().with_context(|| format!("{} is not a valid circuit", path.display()))?;
+        Ok(c)
+    }
+
+    /// Rejects files the editor could never produce (and that would crash the inspector or the sim).
+    pub fn validate(&self) -> Result<()> {
+        use anyhow::ensure;
+        ensure!(matches!(self.rows, 30 | 45 | 60), "board must have 30, 45 or 60 rows, not {}", self.rows);
+        let mut ids = std::collections::HashSet::new();
+        let mut used = std::collections::HashSet::new();
+        for p in &self.parts {
+            ensure!(
+                !p.id.is_empty() && p.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                "part id {:?} must be letters, digits or _ only",
+                p.id
+            );
+            ensure!(ids.insert(p.id.as_str()), "two parts are both named {}", p.id);
+            let need = p.kind.leg_names().len();
+            ensure!(p.legs.len() == need, "{} needs {need} legs but has {}", p.id, p.legs.len());
+            for h in &p.legs {
+                ensure!(self.on_board(*h), "{} has a leg at {}, off the {}-row board", p.id, h.short(), self.rows);
+                ensure!(used.insert(*h), "two legs are in the same hole, {}", h.short());
+            }
+            if let Some(v) = p.value {
+                ensure!(v.is_finite() && v > 0.0, "{} has an invalid value ({v})", p.id);
+            }
+        }
+        Ok(())
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -336,6 +364,14 @@ impl Circuit {
             if !self.fits(&legs, None) {
                 return None;
             }
+        }
+        self.add_with_legs(kind, legs)
+    }
+
+    /// Places a new part with exactly these legs. Returns the new id, or None if they don't fit.
+    pub fn add_with_legs(&mut self, kind: Kind, legs: Vec<Hole>) -> Option<String> {
+        if legs.len() != kind.leg_names().len() || !self.fits(&legs, None) {
+            return None;
         }
         let id = self.next_id(kind);
         let color = match kind {
@@ -466,6 +502,22 @@ mod tests {
         assert_eq!(c.add(Kind::Led, Hole { row: 5, col: Col::D }).as_deref(), Some("LED1"));
     }
 
+
+    #[test]
+    fn examples_are_valid() {
+        for c in examples() {
+            c.validate().unwrap_or_else(|e| panic!("{}: {e:#}", c.name));
+        }
+    }
+
+    #[test]
+    fn wire_can_start_between_parts() {
+        let mut c = Circuit::default();
+        c.add(Kind::Led, Hole { row: 8, col: Col::C }).unwrap();
+        c.add(Kind::Led, Hole { row: 1, col: Col::C }).unwrap();
+        let w = c.add_with_legs(Kind::Wire, vec![Hole { row: 5, col: Col::C }, Hole { row: 20, col: Col::A }]);
+        assert_eq!(w.as_deref(), Some("W1"));
+    }
 
     #[test]
     #[ignore]

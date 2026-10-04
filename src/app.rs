@@ -481,9 +481,11 @@ impl App {
                 ui.label(RichText::new("Value").color(theme::DIM));
                 let r = ui.add(egui::TextEdit::singleline(&mut self.value_text.1).desired_width(90.0).font(FontId::monospace(13.0)));
                 if r.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter)) && r.has_focus() {
-                    match parse_si(&self.value_text.1).filter(|x| *x > 0.0) {
-                        Some(x) => part.value = Some(x),
-                        None => {}
+                    // Only commit real edits: re-parsing the rounded display would change the value.
+                    if self.value_text.1.trim() != fmt_si(v, unit) {
+                        if let Some(x) = parse_si(&self.value_text.1).filter(|x| x.is_finite() && *x > 0.0) {
+                            part.value = Some(x);
+                        }
                     }
                     self.value_text.1 = fmt_si(part.value.unwrap_or(v), unit);
                 }
@@ -618,9 +620,15 @@ impl App {
                 }
             }
             if let Some(fix) = apply {
-                if let Some(p) = self.circuit.part_mut(&fix.part) {
+                if let Some(p) = self.circuit.part(&fix.part) {
+                    let mut legs = p.legs.clone();
                     for (leg, to) in fix.moves {
-                        p.legs[leg] = to;
+                        if let Some(l) = legs.get_mut(leg) {
+                            *l = to;
+                        }
+                    }
+                    if self.circuit.fits(&legs, Some(&fix.part)) {
+                        self.circuit.part_mut(&fix.part).unwrap().legs = legs;
                     }
                 }
             }

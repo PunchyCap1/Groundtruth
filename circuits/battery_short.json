@@ -1,13 +1,88 @@
 {
   "name": "Battery short",
-  "description": "A working LED circuit, plus one stray wire (W3) straight from + to −. That wire has almost no resistance, so a huge current flows straight through it. A real battery would get hot, sag and could be damaged. Delete W3 to fix it.",
+  "description": "A working LED circuit, plus one stray wire (W3) straight from + to −. Almost all the current takes that zero-resistance shortcut, so the battery's voltage collapses and the LED goes dark. A real battery would get hot. Delete W3 to fix it.",
   "rows": 30,
   "parts": [
-    { "id": "B1", "kind": "battery", "legs": [{ "row": 1, "col": "L+" }, { "row": 1, "col": "L-" }], "value": 5.0 },
-    { "id": "R1", "kind": "resistor", "legs": [{ "row": 5, "col": "L+" }, { "row": 5, "col": "a" }], "value": 220.0 },
-    { "id": "LED1", "kind": "led", "legs": [{ "row": 5, "col": "c" }, { "row": 6, "col": "c" }], "color": "red" },
-    { "id": "W1", "kind": "wire", "legs": [{ "row": 6, "col": "a" }, { "row": 6, "col": "L-" }], "color": "black" },
-    { "id": "W3", "kind": "wire", "legs": [{ "row": 12, "col": "L+" }, { "row": 12, "col": "L-" }], "color": "yellow" }
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 5,
+          "col": "L+"
+        },
+        {
+          "row": 5,
+          "col": "a"
+        }
+      ],
+      "value": 220.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 5,
+          "col": "c"
+        },
+        {
+          "row": 6,
+          "col": "c"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 6,
+          "col": "a"
+        },
+        {
+          "row": 6,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "W3",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 12,
+          "col": "L+"
+        },
+        {
+          "row": 12,
+          "col": "L-"
+        }
+      ],
+      "color": "yellow"
+    }
   ],
-  "expect": { "pass": false, "fault_parts": ["B1"] }
+  "expect": {
+    "pass": false,
+    "fault_parts": [
+      "B1"
+    ]
+  }
 }

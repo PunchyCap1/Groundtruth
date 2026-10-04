@@ -112,19 +112,12 @@ impl Gemini {
                 .header("x-goog-api-key", &self.api_key)
                 .config()
                 .http_status_as_error(false)
-                // Without a timeout a dead connection leaves the lab partner spinning forever.
-                .timeout_global(Some(std::time::Duration::from_secs(45)))
                 .build()
                 .send_json(&body)
                 .context("calling Gemini")?;
             let status = resp.status();
-            // Read as text first: 5xx errors are often HTML, and must still reach the retry below.
-            let raw = resp.body_mut().read_to_string().context("reading Gemini response")?;
-            let reply: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+            let reply: Value = resp.body_mut().read_json().context("reading Gemini response")?;
             if status.is_success() {
-                if reply.is_null() {
-                    bail!("Gemini returned something that isn't JSON: {raw}");
-                }
                 break reply;
             }
             let transient = matches!(status.as_u16(), 429 | 500 | 503 | 504);
@@ -219,7 +212,7 @@ mod tests {
         let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
         let model = std::env::var("GEMINI_MODEL").unwrap_or(crate::GEMINI_MODELS[0].into());
         let circuit = crate::circuit::examples().into_iter().find(|c| c.name == "LED, wrong row").unwrap();
-        let out = crate::sim::run(&circuit, &crate::sim::ngspice::Ngspice { binary: crate::Config::from_env().ngspice });
+        let out = crate::sim::run(&circuit, &crate::sim::ngspice::Ngspice { binary: "ngspice".into() });
         let reply = Gemini { api_key, model: model.clone() }
             .ask(&[], &context(&circuit, &out), "Review my circuit. Why isn't my LED lighting up?")
             .unwrap();

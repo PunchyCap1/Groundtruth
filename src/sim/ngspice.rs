@@ -35,9 +35,20 @@ impl Ngspice {
         let out = out?;
         let log = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         if !out.status.success() || log.contains("Error") {
-            bail!("ngspice failed:\n{log}");
+            bail!("{}\n{log}", failure_reason(&log));
         }
         parse(&log, netlist)
+    }
+}
+
+/// One line a person can act on, for the top of the error (the app shows only the first line).
+fn failure_reason(log: &str) -> String {
+    if log.contains("singular matrix") {
+        return "ngspice could not solve this circuit: a loop has no resistance in it (check for batteries or wires connected straight across each other).".into();
+    }
+    match log.lines().map(str::trim).find(|l| l.starts_with("Error")) {
+        Some(l) => format!("ngspice could not solve this circuit: {l}"),
+        None => "ngspice could not solve this circuit (see the NGSPICE LOG below).".into(),
     }
 }
 

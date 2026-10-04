@@ -201,8 +201,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
     if resp.drag_stopped() {
         if let (Some(Drag::NewWire { from }), Some(m)) = (&ed.drag, pointer) {
             if let Some(to) = g.nearest(m).filter(|to| to != from && circuit.occupant(*to).is_none()) {
-                if let Some(id) = circuit.add(Kind::Wire, *from) {
-                    circuit.part_mut(&id).unwrap().legs = vec![*from, to];
+                if let Some(id) = circuit.add_with_legs(Kind::Wire, vec![*from, to]) {
                     ed.selected = Some(id);
                 }
             }
