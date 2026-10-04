@@ -8,9 +8,9 @@ The simulator supplies the numbers; Gemini supplies the teaching. Every voltage 
 
 ## What it does
 
-**Spot the mistake.** The rule checker reads the simulated numbers and flags faults on the board. Here, the resistor ends in row 14 but the LED's anode sits in row 15, so no current flows. A green ghost shows where the leg should go, and **Apply fix** moves it.
+**Spot the mistake.** The rule checker reads the simulated numbers and flags faults on the board. Here, the resistor ends in row 14 but the LED's anode sits in row 15, so no current flows. A green ghost shows where the leg should go, and **apply fix** moves it.
 
-![After Apply fix the LED lights at 14.69 mA and the checks pass](docs/screenshots/03-fix-applied.png)
+![After apply fix the LED lights at 14.69 mA and the checks pass](docs/screenshots/03-fix-applied.png)
 
 **Watch it work.** Live readouts update on every edit. In the transistor switch, select SW1 and hold Space: a small base current through R2 switches the LED current through Q1.
 
@@ -24,7 +24,7 @@ The simulator supplies the numbers; Gemini supplies the teaching. Every voltage 
 
 <img src="docs/screenshots/06-parts-tooltip.png" alt="Parts-bin tooltip for the potentiometer" width="420">
 
-**Ask the lab partner.** "Review my circuit", "Why isn't it working?", "Explain it" and "Ideas to try" send the circuit, nets, simulation results and rule findings to Gemini. "Build one for me" asks Gemini to propose a circuit that loads onto the board, where ngspice simulates it like any other.
+**Ask the lab partner.** "review", "why isn't it working?", "explain" and "ideas" send the circuit, nets, simulation results and rule findings to Gemini. "build one for me" asks Gemini to propose a circuit that loads onto the board, where ngspice simulates it like any other.
 
 ## Running it
 
@@ -35,7 +35,7 @@ cp .env.example .env   # then add your GEMINI_API_KEY
 cargo run
 ```
 
-Open **Examples** for ready-made circuits, or pass one on the command line: `cargo run -- circuits/pot_dimmer.json --split`.
+Open **examples** for ready-made circuits (LED, transistor switch, night light, fading LED, blinker and more), or pass one on the command line: `cargo run -- circuits/pot_dimmer.json --split`.
 
 The app works without a Gemini key; only the lab partner is disabled. `GEMINI_MODEL` and `NGSPICE_PATH` in `.env` are optional.
 

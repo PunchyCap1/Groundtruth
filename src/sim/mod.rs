@@ -4,8 +4,14 @@ pub mod checks;
 pub mod netlist;
 pub mod ngspice;
 
-use crate::circuit::{Circuit, Hole};
+use crate::circuit::{Circuit, Hole, Kind};
 use std::collections::BTreeMap;
+
+/// Placeholder in a transient netlist for the data file ngspice writes; the runner fills in a temp path.
+pub const TRAN_OUT: &str = "@TRAN_OUT@";
+
+/// How far back an LED's brightest moment counts as "recently lit" for the checks.
+pub const PEAK_WINDOW: f64 = 2.0;
 
 #[derive(Clone, Debug, Default)]
 pub struct Netlist {
@@ -25,6 +31,38 @@ pub struct SimResult {
     /// (part id, leg) -> amps flowing into the part at that leg.
     pub leg_current: BTreeMap<(String, usize), f64>,
     pub log: String,
+    /// Transient only: simulated time at the end of this chunk, in seconds.
+    pub time: Option<f64>,
+    /// Transient only: every time point in this chunk.
+    pub trace: Option<Trace>,
+    /// Transient only: largest current into each leg over the last [`PEAK_WINDOW`] seconds.
+    pub recent_peak: BTreeMap<(String, usize), f64>,
+}
+
+/// Waveforms from one transient chunk. Times start at 0 at the start of the chunk.
+#[derive(Clone, Debug, Default)]
+pub struct Trace {
+    pub time: Vec<f64>,
+    pub net_voltage: BTreeMap<String, Vec<f64>>,
+    pub leg_current: BTreeMap<(String, usize), Vec<f64>>,
+}
+
+/// What carries over from one transient chunk to the next, so time keeps running across edits.
+#[derive(Clone, Debug, Default)]
+pub struct TranState {
+    /// Simulated seconds since the last reset.
+    pub t: f64,
+    /// Board net key -> volts at time `t`.
+    pub net_v: BTreeMap<String, f64>,
+    /// Capacitor id -> volts from leg 0 to leg 1.
+    pub cap_v: BTreeMap<String, f64>,
+    /// (part id, leg) -> (largest current seen recently, when).
+    pub peak: BTreeMap<(String, usize), (f64, f64)>,
+}
+
+/// Circuits with something that stores energy are simulated over time instead of at a DC operating point.
+pub fn is_dynamic(circuit: &Circuit) -> bool {
+    circuit.parts.iter().any(|p| p.kind == Kind::Capacitor)
 }
 
 impl SimResult {
@@ -99,6 +137,50 @@ pub fn run(circuit: &Circuit, ng: &ngspice::Ngspice) -> Output {
     out
 }
 
+/// Simulates `dt` more seconds from `state`. On failure the state is returned unchanged.
+pub fn run_tran(circuit: &Circuit, ng: &ngspice::Ngspice, state: &TranState, dt: f64) -> (Output, TranState) {
+    let mut out = Output::default();
+    let nl = match netlist::build_tran(circuit, state, dt) {
+        Ok(n) => n,
+        Err(e) => {
+            out.error = Some(format!("{e:#}"));
+            return (out, state.clone());
+        }
+    };
+    out.netlist = Some(nl.clone());
+    let mut sim = match ng.run(&nl) {
+        Ok(s) => s,
+        Err(e) => {
+            out.error = Some(format!("{e:#}"));
+            return (out, state.clone());
+        }
+    };
+
+    let end = state.t + dt;
+    let mut next = TranState { t: end, net_v: sim.net_voltage.clone(), cap_v: BTreeMap::new(), peak: state.peak.clone() };
+    for p in circuit.parts.iter().filter(|p| p.kind == Kind::Capacitor) {
+        if let (Some(a), Some(b)) = (sim.voltage(&p.legs[0]), sim.voltage(&p.legs[1])) {
+            next.cap_v.insert(p.id.clone(), a - b);
+        }
+    }
+    if let Some(trace) = &sim.trace {
+        for (key, series) in &trace.leg_current {
+            let Some((k, max)) = series.iter().copied().enumerate().max_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
+            let at = state.t + trace.time[k];
+            let stale = next.peak.get(key).is_none_or(|(v, when)| *when < end - PEAK_WINDOW || max >= *v);
+            if stale {
+                next.peak.insert(key.clone(), (max, at));
+            }
+        }
+    }
+    next.peak.retain(|(id, _), _| circuit.part(id).is_some());
+    sim.time = Some(end);
+    sim.recent_peak = next.peak.iter().map(|(k, (v, _))| (k.clone(), *v)).collect();
+    out.checks = Some(checks::analyze(circuit, &sim));
+    out.sim = Some(sim);
+    (out, next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +226,95 @@ mod tests {
             let on = run(&c, &ng).sim.unwrap().current("LED1").unwrap();
             assert!(off < 1e-6 && on > 3e-3, "{name}: off {off} A, on {on} A");
         }
+    }
+
+    /// Runs `seconds` of transient in 50 ms chunks, calling `each` after every chunk.
+    fn run_for(c: &Circuit, ng: &ngspice::Ngspice, state: &mut TranState, seconds: f64, mut each: impl FnMut(&Output)) {
+        for _ in 0..(seconds / 0.05).round() as usize {
+            let (out, next) = run_tran(c, ng, state, 0.05);
+            assert!(out.error.is_none(), "{}: {:?}", c.name, out.error);
+            each(&out);
+            *state = next;
+        }
+    }
+
+    #[test]
+    fn transient_chunks_follow_the_rc_curve() {
+        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        if ng.probe().is_none() {
+            return;
+        }
+        // 5 V through 10 kΩ into 10 µF: τ = 0.1 s, so V(t) = 5 (1 − e^(−t/τ)).
+        let c: Circuit = serde_json::from_str(
+            r#"{"parts": [
+                {"id": "B1", "kind": "battery", "legs": [{"row": 1, "col": "L+"}, {"row": 1, "col": "L-"}], "value": 5.0},
+                {"id": "R1", "kind": "resistor", "legs": [{"row": 3, "col": "L+"}, {"row": 3, "col": "a"}], "value": 10000.0},
+                {"id": "C1", "kind": "capacitor", "legs": [{"row": 3, "col": "c"}, {"row": 3, "col": "L-"}], "value": 1e-5}
+            ]}"#,
+        )
+        .unwrap();
+        let mut state = TranState::default();
+        run_for(&c, &ng, &mut state, 0.2, |_| {});
+        let want = 5.0 * (1.0 - (-2.0f64).exp());
+        let got = state.cap_v["C1"];
+        assert!((got - want).abs() < 0.03, "after 0.2 s: {got} V, want {want} V");
+    }
+
+    #[test]
+    fn blinker_blinks_without_faults() {
+        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        if ng.probe().is_none() {
+            return;
+        }
+        let c = examples().into_iter().find(|c| c.name == "LED blinker").unwrap();
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        let mut state = TranState::default();
+        run_for(&c, &ng, &mut state, 3.0, |out| {
+            let i = out.sim.as_ref().unwrap().current("LED1").unwrap();
+            (lo, hi) = (lo.min(i), hi.max(i));
+            let checks = out.checks.as_ref().unwrap();
+            assert!(checks.pass, "{:#?}", checks.findings);
+        });
+        assert!(hi > 3e-3 && lo < 0.5e-3, "LED1 never blinked: {lo} .. {hi} A");
+    }
+
+    #[test]
+    fn fading_led_fades_after_the_button() {
+        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        if ng.probe().is_none() {
+            return;
+        }
+        let mut c = examples().into_iter().find(|c| c.name == "Fading LED").unwrap();
+        let mut state = TranState::default();
+        c.part_mut("SW1").unwrap().pressed = true;
+        run_for(&c, &ng, &mut state, 1.0, |_| {});
+        c.part_mut("SW1").unwrap().pressed = false;
+        let mut led = Vec::new();
+        run_for(&c, &ng, &mut state, 1.5, |out| led.push(out.sim.as_ref().unwrap().current("LED1").unwrap()));
+        assert!(led[0] > 3e-3, "lit right after release: {} A", led[0]);
+        assert!(led.windows(2).all(|w| w[1] <= w[0] + 1e-6), "should only dim: {led:?}");
+        assert!(led[led.len() - 1] < led[0] * 0.5, "should fade: {led:?}");
+    }
+
+    #[test]
+    fn night_light_follows_the_ldr_and_switch() {
+        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        if ng.probe().is_none() {
+            return;
+        }
+        let dark = examples().into_iter().find(|c| c.name == "Night light").unwrap();
+        let led = |c: &Circuit| {
+            let out = run(c, &ng);
+            (out.sim.unwrap().current("LED1").unwrap(), out.checks.unwrap().pass)
+        };
+        let mut bright = dark.clone();
+        bright.part_mut("LDR1").unwrap().light = 1.0;
+        let mut switched_off = dark.clone();
+        switched_off.part_mut("S1").unwrap().pressed = false;
+        let (on, (lit, _), (off, ok)) = (led(&dark).0, led(&bright), led(&switched_off));
+        assert!(on > 3e-3, "dark: {on} A");
+        assert!(lit < 0.5e-3, "bright: {lit} A");
+        assert!(off < 1e-6 && ok, "switched off: {off} A");
+        assert!(led(&bright).1, "bright light should be an info, not a fault");
     }
 }

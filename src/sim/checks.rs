@@ -1,7 +1,7 @@
 //! Turn simulated numbers into findings. Rules read only the circuit and
 //! SimResult, so every number shown here comes from ngspice.
 
-use super::{Checks, Finding, Fix, Severity, SimResult};
+use super::{Checks, Finding, Fix, PEAK_WINDOW, Severity, SimResult};
 use crate::circuit::{Circuit, Hole, Kind, Part, fmt_si};
 use std::collections::BTreeMap;
 
@@ -36,7 +36,17 @@ pub fn analyze(circuit: &Circuit, sim: &SimResult) -> Checks {
                 let Some(i) = i else { continue };
                 let (anode, cathode) = (part.legs[0], part.legs[1]);
                 let ma = milliamps(i);
-                if i < LED_MIN_A {
+                let peak = sim.recent_peak.get(&(part.id.clone(), 0)).copied().filter(|p| *p >= LED_MIN_A);
+                if let (true, Some(peak)) = (i < LED_MIN_A, peak) {
+                    // Over time, dark now but lit a moment ago: blinking or fading, not broken.
+                    findings.push(finding(
+                        part,
+                        Severity::Info,
+                        format!("{} is changing over time: {:.2} mA now, up to {:.1} mA in the last {:.0} s.", part.id, ma, milliamps(peak), PEAK_WINDOW),
+                        "Watch it on the board, or select it to see its waveform on the scope.".into(),
+                        vec![],
+                    ));
+                } else if i < LED_MIN_A {
                     findings.push(dark_led(circuit, part, ma, v(&anode), v(&cathode), &nets));
                 } else if i > LED_MAX_A {
                     findings.push(finding(
@@ -182,12 +192,25 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
     }
 
     // An open switch somewhere is the likely, and intended, reason.
-    if let Some(sw) = circuit.parts.iter().find(|p| p.kind == Kind::Button && !p.pressed) {
+    if let Some(sw) = circuit.parts.iter().find(|p| matches!(p.kind, Kind::Button | Kind::Switch) && !p.pressed) {
+        let how = if sw.kind == Kind::Switch { "tap Space to flip it on" } else { "hold Space to press it" };
         return Finding {
             part: id.into(),
             severity: Severity::Info,
             headline: format!("{id} is off while {} is open.", sw.id),
-            detail: format!("Select {} and hold Space to press it.", sw.id),
+            detail: format!("Select {} and {how}.", sw.id),
+            highlight: vec![],
+            fix: None,
+        };
+    }
+
+    // A night-light style circuit is supposed to be off in bright light.
+    if let Some(ldr) = circuit.parts.iter().find(|p| p.kind == Kind::Ldr && p.light > 0.5) {
+        return Finding {
+            part: id.into(),
+            severity: Severity::Info,
+            headline: format!("{id} is off while {} sees {:.0}% light.", ldr.id, ldr.light * 100.0),
+            detail: format!("Select {} and drag its Light slider down to simulate covering it.", ldr.id),
             highlight: vec![],
             fix: None,
         };

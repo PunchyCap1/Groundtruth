@@ -95,12 +95,25 @@ pub enum Kind {
     Capacitor,
     Diode,
     Npn,
+    Ldr,
+    Switch,
 }
 
 impl Kind {
     /// Palette order.
-    pub const ALL: [Kind; 9] =
-        [Kind::Battery, Kind::Wire, Kind::Resistor, Kind::Led, Kind::Button, Kind::Pot, Kind::Capacitor, Kind::Diode, Kind::Npn];
+    pub const ALL: [Kind; 11] = [
+        Kind::Battery,
+        Kind::Wire,
+        Kind::Resistor,
+        Kind::Led,
+        Kind::Button,
+        Kind::Pot,
+        Kind::Capacitor,
+        Kind::Diode,
+        Kind::Npn,
+        Kind::Ldr,
+        Kind::Switch,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -113,6 +126,8 @@ impl Kind {
             Kind::Capacitor => "Capacitor",
             Kind::Diode => "Diode",
             Kind::Npn => "NPN transistor",
+            Kind::Ldr => "Photoresistor",
+            Kind::Switch => "Slide switch",
         }
     }
 
@@ -127,6 +142,8 @@ impl Kind {
             Kind::Capacitor => "Stores charge. Acts as an open circuit at DC.",
             Kind::Diode => "Lets current flow one way only (toward the stripe).",
             Kind::Npn => "A small base current switches a bigger collector current.",
+            Kind::Ldr => "Resistance drops as light rises: about 1 MΩ in the dark, 1 kΩ in bright light.",
+            Kind::Switch => "Stays on or off. Select it and tap Space to flip it.",
         }
     }
 
@@ -141,6 +158,8 @@ impl Kind {
             Kind::Capacitor => "C",
             Kind::Diode => "D",
             Kind::Npn => "Q",
+            Kind::Ldr => "LDR",
+            Kind::Switch => "S",
         }
     }
 
@@ -186,7 +205,7 @@ impl Kind {
                 };
                 vec![Hole { row: at.row, col: plus }, Hole { row: at.row, col: minus }]
             }
-            Kind::Battery | Kind::Capacitor | Kind::Button => vec![at, down(2)],
+            Kind::Battery | Kind::Capacitor | Kind::Button | Kind::Ldr | Kind::Switch => vec![at, down(2)],
             Kind::Wire | Kind::Diode => vec![at, down(3)],
             Kind::Resistor => vec![at, down(4)],
             Kind::Led => vec![at, down(1)],
@@ -212,6 +231,9 @@ pub struct Part {
     /// Potentiometer wiper position, 0 (at end A) to 1 (at end B).
     #[serde(default = "half", skip_serializing_if = "is_half")]
     pub wiper: f64,
+    /// Photoresistor light level, 0 (dark) to 1 (bright).
+    #[serde(default = "half", skip_serializing_if = "is_half")]
+    pub light: f64,
 }
 
 fn half() -> f64 {
@@ -223,6 +245,11 @@ fn is_half(v: &f64) -> bool {
 }
 
 impl Part {
+    /// Photoresistor resistance for its light level, log-scaled from 1 MΩ (dark) to 1 kΩ (bright).
+    pub fn ldr_ohms(&self) -> f64 {
+        1e6 * 1e-3f64.powf(self.light.clamp(0.0, 1.0))
+    }
+
     /// One-line description: "R1 · resistor 220 Ω".
     pub fn describe(&self) -> String {
         let mut s = format!("{} · {}", self.id, self.kind.name().to_lowercase());
@@ -343,7 +370,7 @@ impl Circuit {
             Kind::Wire => Some(WIRE_COLORS[self.parts.iter().filter(|p| p.kind == Kind::Wire).count() % WIRE_COLORS.len()].to_string()),
             _ => None,
         };
-        self.parts.push(Part { id: id.clone(), kind, legs, value: kind.default_value(), color, pressed: false, wiper: 0.5 });
+        self.parts.push(Part { id: id.clone(), kind, legs, value: kind.default_value(), color, pressed: false, wiper: 0.5, light: 0.5 });
         Some(id)
     }
 
@@ -386,6 +413,9 @@ pub fn examples() -> Vec<Circuit> {
         include_str!("../circuits/button_led.json"),
         include_str!("../circuits/pot_dimmer.json"),
         include_str!("../circuits/transistor_switch.json"),
+        include_str!("../circuits/night_light.json"),
+        include_str!("../circuits/fading_led.json"),
+        include_str!("../circuits/blinker.json"),
     ]
     .iter()
     .map(|s| serde_json::from_str(s).expect("built-in example parses"))
