@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, channel};
 
@@ -23,6 +24,23 @@ enum Cmd {
     New,
     Open,
     Load(Circuit),
+}
+
+/// A finished simulation pass. `tran` is the state to continue from, for transient chunks.
+struct SimDone {
+    circuit: Circuit,
+    out: sim::Output,
+    tran: Option<(u64, sim::TranState)>,
+}
+
+/// Seconds of history the scope keeps.
+const SCOPE_WINDOW: f64 = 5.0;
+
+/// One scope point, decimated from the transient traces.
+struct Sample {
+    t: f64,
+    v: BTreeMap<String, f64>,
+    i: BTreeMap<(String, usize), f64>,
 }
 
 enum Entry {
@@ -52,9 +70,17 @@ pub struct App {
     value_text: (String, String),
     notice: Option<(String, f64)>,
 
-    sim_rx: Option<Receiver<(Circuit, sim::Output)>>,
+    sim_rx: Option<Receiver<SimDone>>,
     sim_for: Option<Circuit>,
     out: sim::Output,
+    /// Transient time state; chunks from before the last reset carry an older `tran_gen` and are dropped.
+    tran: sim::TranState,
+    tran_gen: u64,
+    tran_paused: bool,
+    tran_speed: f64,
+    /// Wall-clock time the last chunk was started, which sets how much simulated time the next one covers.
+    tran_wall: f64,
+    scope: VecDeque<Sample>,
 
     chat: Vec<Entry>,
     input: String,
@@ -87,6 +113,12 @@ impl App {
             sim_rx: None,
             sim_for: None,
             out: sim::Output::default(),
+            tran: sim::TranState::default(),
+            tran_gen: 0,
+            tran_paused: false,
+            tran_speed: 1.0,
+            tran_wall: 0.0,
+            scope: VecDeque::new(),
             chat: Vec::new(),
             input: String::new(),
             ai_rx: None,
@@ -127,6 +159,15 @@ impl App {
         self.path = path;
         self.editor.selected = None;
         self.held = None;
+        self.reset_time();
+    }
+
+    /// Back to t = 0 with every capacitor discharged.
+    fn reset_time(&mut self) {
+        self.tran = sim::TranState::default();
+        self.tran_gen += 1;
+        self.scope.clear();
+        self.sim_for = None;
     }
 
     fn open_path(&mut self, path: PathBuf) {
@@ -187,28 +228,83 @@ impl App {
     fn pump_sim(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &self.sim_rx {
             match rx.try_recv() {
-                Ok((c, out)) => {
-                    self.sim_for = Some(c);
-                    self.out = out;
+                Ok(done) => {
                     self.sim_rx = None;
+                    match done.tran {
+                        Some((generation, _)) if generation != self.tran_gen => {}
+                        Some((_, next)) => {
+                            self.record_scope(&done.out);
+                            self.tran = next;
+                            self.sim_for = Some(done.circuit);
+                            self.out = done.out;
+                        }
+                        None => {
+                            self.sim_for = Some(done.circuit);
+                            self.out = done.out;
+                        }
+                    }
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => self.sim_rx = None,
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
             }
         }
         let live = self.live();
-        if self.sim_for.as_ref() == Some(&live) {
-            return;
-        }
-        let (tx, rx) = channel();
-        self.sim_rx = Some(rx);
+        let now = ctx.input(|i| i.time);
         let ng = Ngspice { binary: self.config.ngspice.clone() };
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let out = sim::run(&live, &ng);
-            let _ = tx.send((live, out));
-            ctx.request_repaint();
-        });
+        let (tx, rx) = channel();
+        let repaint = ctx.clone();
+
+        if !sim::is_dynamic(&live) {
+            if self.sim_for.as_ref() == Some(&live) {
+                return;
+            }
+            std::thread::spawn(move || {
+                let out = sim::run(&live, &ng);
+                let _ = tx.send(SimDone { circuit: live, out, tran: None });
+                repaint.request_repaint();
+            });
+        } else {
+            // Time keeps running: each chunk covers the wall time since the last one.
+            // Paused, a 1 µs chunk still re-solves edits without moving the clock noticeably.
+            let dt = if self.tran_paused {
+                if self.sim_for.as_ref() == Some(&live) {
+                    return;
+                }
+                1e-6
+            } else {
+                ((now - self.tran_wall) * self.tran_speed).clamp(1e-3, 0.2)
+            };
+            self.tran_wall = now;
+            let (state, generation) = (self.tran.clone(), self.tran_gen);
+            std::thread::spawn(move || {
+                let (out, next) = sim::run_tran(&live, &ng, &state, dt);
+                let _ = tx.send(SimDone { circuit: live, out, tran: Some((generation, next)) });
+                repaint.request_repaint();
+            });
+        }
+        self.sim_rx = Some(rx);
+    }
+
+    /// Appends a chunk's waveforms to the scope, one point per 5 ms of simulated time.
+    fn record_scope(&mut self, out: &sim::Output) {
+        let Some(trace) = out.sim.as_ref().and_then(|s| s.trace.as_ref()) else { return };
+        let start = self.tran.t;
+        let mut last = self.scope.back().map_or(f64::MIN, |s| s.t);
+        for (k, t) in trace.time.iter().enumerate() {
+            let t = start + t;
+            if t - last < 0.005 && k + 1 < trace.time.len() {
+                continue;
+            }
+            last = t;
+            self.scope.push_back(Sample {
+                t,
+                v: trace.net_voltage.iter().map(|(n, s)| (n.clone(), s[k])).collect(),
+                i: trace.leg_current.iter().map(|(n, s)| (n.clone(), s[k])).collect(),
+            });
+        }
+        while self.scope.front().is_some_and(|s| s.t < last - SCOPE_WINDOW) {
+            self.scope.pop_front();
+        }
     }
 
     fn ask(&mut self, ctx: &egui::Context, question: String) {
@@ -293,16 +389,25 @@ impl App {
         if ctx.text_edit_focused() {
             return;
         }
-        let (del, flip, esc) = ctx.input(|i| {
-            (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace), i.key_pressed(Key::R), i.key_pressed(Key::Escape))
+        let (del, flip, esc, toggle) = ctx.input(|i| {
+            (
+                i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
+                i.key_pressed(Key::R),
+                i.key_pressed(Key::Escape),
+                i.key_pressed(Key::Space),
+            )
         });
         if let Some(id) = self.editor.selected.clone() {
             if del {
                 self.circuit.remove(&id);
                 self.editor.selected = None;
-            } else if flip {
-                if let Some(p) = self.circuit.part_mut(&id) {
+            } else if let Some(p) = self.circuit.part_mut(&id) {
+                if flip {
                     p.legs.reverse();
+                }
+                // Slide switches latch: tap Space to flip.
+                if toggle && p.kind == Kind::Switch {
+                    p.pressed = !p.pressed;
                 }
             }
         }
@@ -394,7 +499,9 @@ impl App {
                 ui.painter().rect_stroke(rect, 6, Stroke::new(1.0, if hot { theme::AMBER } else { theme::EDGE }), egui::StrokeKind::Inside);
                 board::icon(ui.painter(), egui::Rect::from_center_size(rect.center() - vec2(0.0, 8.0), egui::Vec2::splat(36.0)), *kind);
                 ui.painter().text(rect.center_bottom() - vec2(0.0, 10.0), egui::Align2::CENTER_CENTER, kind.name(), FontId::proportional(11.5), theme::TEXT);
-                ui.painter().text(rect.left_top() + vec2(6.0, 4.0), egui::Align2::LEFT_TOP, (i + 1).to_string(), FontId::monospace(9.5), theme::DIM);
+                if i < 9 {
+                    ui.painter().text(rect.left_top() + vec2(6.0, 4.0), egui::Align2::LEFT_TOP, (i + 1).to_string(), FontId::monospace(9.5), theme::DIM);
+                }
                 if resp.dragged() {
                     if let Some(m) = ui.ctx().pointer_interact_pos() {
                         let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("dnd_ghost")));
@@ -425,7 +532,7 @@ impl App {
             ("drag hole", "draw a wire"),
             ("R", "flip / reverse part"),
             ("Del", "delete part"),
-            ("Space", "hold a button"),
+            ("Space", "press button / flip switch"),
             ("1–9", "quick-add part"),
             ("Ctrl+Z", "undo"),
         ] {
@@ -519,6 +626,18 @@ impl App {
                 let down = held.as_deref() == Some(part.id.as_str());
                 ui.label(RichText::new(if down { "● held (Space)" } else { "Hold Space to press it momentarily." }).color(if down { theme::AMBER } else { theme::DIM }).size(12.0));
             }
+            Kind::Switch => {
+                ui.checkbox(&mut part.pressed, "On");
+                ui.label(RichText::new("Tap Space to flip it.").color(theme::DIM).size(12.0));
+            }
+            Kind::Ldr => {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Light").color(theme::DIM));
+                    ui.add(egui::Slider::new(&mut part.light, 0.0..=1.0).show_value(false));
+                    ui.label(RichText::new(format!("{:.0}%", part.light * 100.0)).monospace());
+                });
+                ui.label(RichText::new(format!("Model resistance: {}", fmt_si(part.ldr_ohms(), "Ω"))).color(theme::DIM).size(12.0));
+            }
             Kind::Pot => {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Wiper").color(theme::DIM));
@@ -576,7 +695,10 @@ impl App {
                 _ => (theme::DIM, "…"),
             };
             ui.label(RichText::new(word).font(FontId::monospace(13.0)).color(color).strong());
-            ui.label(RichText::new("from ngspice + rule checks").font(FontId::monospace(10.5)).color(theme::DIM));
+            // Shares the panel with the scope over time, so skip the caption there.
+            if !sim::is_dynamic(&self.circuit) {
+                ui.label(RichText::new("from ngspice + rule checks").font(FontId::monospace(10.5)).color(theme::DIM));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.checkbox(&mut self.show_readouts, "readouts");
                 ui.checkbox(&mut self.show_fix, "fix ghosts");
@@ -635,6 +757,66 @@ impl App {
                 egui::CollapsingHeader::new(RichText::new("NGSPICE LOG").font(FontId::monospace(11.0)).color(theme::DIM)).show(ui, |ui| code_block(ui, s.log.trim()));
             }
         });
+    }
+
+    /// Waveforms of the selected part, or every capacitor's voltage, over the last few seconds.
+    fn scope_panel(&mut self, ui: &mut egui::Ui) {
+        let selected = self.editor.selected.as_deref().and_then(|id| self.circuit.part(id)).filter(|p| p.kind != Kind::Wire).cloned();
+        ui.horizontal(|ui| {
+            theme::section(ui, "SCOPE");
+            ui.label(RichText::new(format!("t = {:.2} s", self.tran.t)).font(FontId::monospace(12.5)).color(theme::CYAN))
+                .on_hover_text("Simulated time. Circuits with capacitors run as a live ngspice transient simulation.");
+            if tool_button(ui, if self.tran_paused { "▶ Run" } else { "Pause" }, "Freeze time; edits still re-solve").clicked() {
+                self.tran_paused = !self.tran_paused;
+                self.tran_wall = ui.input(|i| i.time);
+            }
+            if tool_button(ui, "Reset", "Back to t = 0 with every capacitor discharged").clicked() {
+                self.reset_time();
+            }
+            let slow = self.tran_speed < 1.0;
+            if tool_button(ui, if slow { "0.1×" } else { "1×" }, "Simulation speed: real time or slow motion").clicked() {
+                self.tran_speed = if slow { 1.0 } else { 0.1 };
+            }
+            let what = match &selected {
+                Some(p) => format!("{} · last {SCOPE_WINDOW:.0} s", p.id),
+                None => format!("capacitors · select a part to probe it · last {SCOPE_WINDOW:.0} s"),
+            };
+            ui.add(egui::Label::new(RichText::new(what).font(FontId::monospace(10.5)).color(theme::DIM)).truncate());
+        });
+        let colors = [theme::CYAN, theme::AMBER, theme::GREEN];
+        let mut volts: Vec<(String, Color32, Vec<(f64, f64)>)> = Vec::new();
+        let mut amps = Vec::new();
+        match &selected {
+            Some(p) => {
+                for (leg, h) in p.legs.iter().enumerate() {
+                    let net = h.net_key();
+                    let pts = self.scope.iter().filter_map(|s| Some((s.t, *s.v.get(&net)?))).collect();
+                    volts.push((format!("{} {}", p.id, p.kind.leg_names()[leg]), colors[leg % 3], pts));
+                }
+                let sign = if p.kind == Kind::Battery { -1e3 } else { 1e3 };
+                let key = (p.id.clone(), 0);
+                let pts: Vec<(f64, f64)> = self.scope.iter().filter_map(|s| Some((s.t, s.i.get(&key)? * sign))).collect();
+                if !pts.is_empty() {
+                    amps.push((format!("{} current", p.id), theme::RED, pts));
+                }
+            }
+            None => {
+                for (k, p) in self.circuit.parts.iter().filter(|p| p.kind == Kind::Capacitor).enumerate() {
+                    let (a, b) = (p.legs[0].net_key(), p.legs[1].net_key());
+                    let pts = self.scope.iter().filter_map(|s| Some((s.t, s.v.get(&a)? - s.v.get(&b)?))).collect();
+                    volts.push((format!("{} across", p.id), colors[k % 3], pts));
+                }
+            }
+        }
+        let t_end = self.scope.back().map_or(0.0, |s| s.t);
+        let h = ui.available_height();
+        if amps.is_empty() {
+            strip(ui, h, "V", t_end, &volts);
+        } else {
+            strip(ui, h * 0.58, "V", t_end, &volts);
+            ui.add_space(4.0);
+            strip(ui, ui.available_height(), "mA", t_end, &amps);
+        }
     }
 
     fn lab_partner(&mut self, ui: &mut egui::Ui) -> Vec<String> {
@@ -775,7 +957,16 @@ impl eframe::App for App {
         egui::Panel::right("partner").frame(side).default_size(380.0).min_size(320.0).show(ui, |ui| {
             hovered_issue = self.lab_partner(ui);
         });
-        egui::Panel::bottom("checks").frame(side).default_size(170.0).min_size(90.0).resizable(true).show(ui, |ui| self.checks_panel(ui));
+        egui::Panel::bottom("checks").frame(side).default_size(190.0).min_size(90.0).resizable(true).show(ui, |ui| {
+            if sim::is_dynamic(&self.circuit) {
+                ui.columns(2, |cols| {
+                    cols[0].vertical(|ui| self.checks_panel(ui));
+                    cols[1].vertical(|ui| self.scope_panel(ui));
+                });
+            } else {
+                self.checks_panel(ui);
+            }
+        });
 
         let flagged = std::mem::take(&mut self.flagged);
         egui::CentralPanel::default().frame(egui::Frame::new().fill(theme::BG).inner_margin(12)).show(ui, |ui| {
@@ -847,7 +1038,9 @@ impl eframe::App for App {
 
         self.flagged = hovered_issue;
         self.pump_sim(&ctx);
-        if self.sim_rx.is_some() || self.ai_rx.is_some() {
+        if sim::is_dynamic(&self.circuit) && !self.tran_paused {
+            ctx.request_repaint();
+        } else if self.sim_rx.is_some() || self.ai_rx.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         let title = format!("Ground Truth — {}{}", self.circuit.name, if self.circuit != self.saved { " •" } else { "" });
@@ -881,6 +1074,47 @@ fn issue_card(ui: &mut egui::Ui, issue: &Issue, selected: &mut Option<String>) -
         *selected = issue.parts.first().cloned();
     }
     resp.hovered()
+}
+
+/// A strip chart of `series` (label, color, (time, value) points) over the last [`SCOPE_WINDOW`] seconds up to `t_end`.
+fn strip(ui: &mut egui::Ui, height: f32, unit: &str, t_end: f64, series: &[(String, Color32, Vec<(f64, f64)>)]) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height.max(40.0)), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4, theme::BG);
+    painter.rect_stroke(rect, 4, Stroke::new(1.0, theme::EDGE), egui::StrokeKind::Inside);
+    let values = series.iter().flat_map(|s| s.2.iter().map(|p| p.1));
+    let (mut lo, mut hi) = values.fold((0.0f64, 0.0f64), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    // At least one unit of span, so nanovolt drift doesn't fill the screen.
+    if hi - lo < 1.0 {
+        hi = lo + 1.0;
+    }
+    let pad = (hi - lo) * 0.08;
+    (lo, hi) = (lo - pad, hi + pad);
+    let plot = egui::Rect::from_min_max(rect.min + vec2(52.0, 6.0), rect.max - vec2(8.0, 6.0));
+    let t0 = t_end - SCOPE_WINDOW;
+    let at = |t: f64, v: f64| {
+        egui::pos2(
+            plot.left() + ((t - t0) / SCOPE_WINDOW) as f32 * plot.width(),
+            plot.bottom() - ((v - lo) / (hi - lo)) as f32 * plot.height(),
+        )
+    };
+    let small = FontId::monospace(10.0);
+    let grid = Stroke::new(1.0, theme::EDGE);
+    painter.line_segment([at(t0, 0.0), at(t_end, 0.0)], grid);
+    for v in [hi - pad, lo + pad] {
+        painter.text(egui::pos2(rect.left() + 6.0, at(t0, v).y), egui::Align2::LEFT_CENTER, format!("{v:.2} {unit}"), small.clone(), theme::DIM);
+    }
+    for (k, (label, color, pts)) in series.iter().enumerate() {
+        let line: Vec<egui::Pos2> = pts.iter().filter(|p| p.0 >= t0).map(|p| at(p.0, p.1)).collect();
+        if line.len() > 1 {
+            painter.add(egui::Shape::line(line, Stroke::new(1.6, *color)));
+        }
+        let now = pts.last().map(|p| format!("{label}  {:.2} {unit}", p.1)).unwrap_or(label.clone());
+        let galley = painter.layout_no_wrap(now, small.clone(), *color);
+        let at = plot.right_top() + vec2(-4.0 - galley.size().x, 2.0 + 14.0 * k as f32);
+        painter.rect_filled(egui::Rect::from_min_size(at, galley.size()).expand(2.0), 2, theme::BG.gamma_multiply(0.85));
+        painter.galley(at, galley, *color);
+    }
 }
 
 fn tool_button(ui: &mut egui::Ui, text: &str, hint: &str) -> egui::Response {
