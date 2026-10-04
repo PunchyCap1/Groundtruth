@@ -538,4 +538,20 @@ mod tests {
         assert_eq!(c.add(Kind::Led, at), None);
         assert_eq!(c.add(Kind::Led, Hole { row: 5, col: Col::D }).as_deref(), Some("LED1"));
     }
+
+}
+#[test]
+fn examples_are_valid() {
+    for c in examples() {
+        c.validate().unwrap_or_else(|e| panic!("{}: {e:#}", c.name));
+    }
+}
+
+#[test]
+fn wire_can_start_between_parts() {
+    let mut c = Circuit::default();
+    c.add(Kind::Led, Hole { row: 8, col: Col::C }).unwrap();
+    c.add(Kind::Led, Hole { row: 1, col: Col::C }).unwrap();
+    let w = c.add_with_legs(Kind::Wire, vec![Hole { row: 5, col: Col::C }, Hole { row: 20, col: Col::A }]);
+    assert_eq!(w.as_deref(), Some("W1"));
 }
