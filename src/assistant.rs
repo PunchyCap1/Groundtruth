@@ -1,6 +1,6 @@
 //! Gemini lab partner: reviews the circuit, answers questions, suggests experiments.
 
-use crate::circuit::{Circuit, Kind};
+use crate::circuit::{Circuit, Kind, fmt_si};
 use crate::sim::checks::milliamps;
 use crate::sim::{Output, Severity};
 use anyhow::{Context, Result, anyhow, bail};
@@ -54,7 +54,9 @@ Parts: polar parts list leg 0 first: battery +, LED anode (long leg), diode anod
 
 Each message includes the current circuit, its nets, an ngspice DC operating point and the app's rule-checker findings. \
 When you quote voltages or currents, use the simulated numbers given; if something wasn't simulated, say so rather than guessing. \
-Capacitors are open in a DC operating point. Push buttons are open unless marked pressed.
+Without capacitors the numbers are a DC operating point. With capacitors the app runs a live transient simulation: \
+the numbers are instantaneous values at simulated time t, capacitors carry charge from moment to moment, and LEDs may blink or fade. Push buttons and slide switches are open unless marked pressed/on. \
+A photoresistor's resistance is set by its light level (given with the part), from about 1 MΩ dark to 1 kΩ bright.
 
 Reply as JSON. `message` is plain text (no markdown, no bullet characters), a few short paragraphs at most. \
 `issues` lists concrete problems or risks, each tied to part ids, with a clear fix in `suggestion`; leave it empty if there are none. \
@@ -146,6 +148,9 @@ pub fn context(circuit: &Circuit, out: &Output) -> String {
         let _ = writeln!(s, "{}", circuit.description);
     }
 
+    if let Some(t) = sim.and_then(|s| s.time) {
+        let _ = writeln!(s, "\nSIMULATION: live transient at t = {t:.3} s. Values below are instantaneous.");
+    }
     let _ = writeln!(s, "\nPARTS:");
     if circuit.parts.is_empty() {
         let _ = writeln!(s, "(empty board)");
@@ -156,7 +161,14 @@ pub fn context(circuit: &Circuit, out: &Output) -> String {
         let mut extra = String::new();
         match p.kind {
             Kind::Button => extra = if p.pressed { " [pressed]".into() } else { " [not pressed]".into() },
+            Kind::Switch => extra = if p.pressed { " [on]".into() } else { " [off]".into() },
             Kind::Pot => extra = format!(" [wiper at {:.0}% from end A]", p.wiper * 100.0),
+            Kind::Capacitor => {
+                if let Some((a, b)) = sim.and_then(|s| Some((s.voltage(&p.legs[0])?, s.voltage(&p.legs[1])?))) {
+                    extra = format!(" [charged to {:.3} V]", a - b);
+                }
+            }
+            Kind::Ldr => extra = format!(" [light {:.0}%, {}]", p.light * 100.0, fmt_si(p.ldr_ohms(), "Ω")),
             _ => {}
         }
         let current = sim.and_then(|s| s.current(&p.id)).map(|i| format!(", current {:.3} mA", milliamps(i))).unwrap_or_default();

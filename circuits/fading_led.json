@@ -1,0 +1,145 @@
+{
+  "name": "Fading LED",
+  "description": "Hold SW1 (select it, hold Space) to charge C1 through R1. Let go and C1 keeps LED1 lit for a moment, fading as it discharges through R2. The scope shows the RC curve.",
+  "rows": 30,
+  "parts": [
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 3,
+          "col": "L+"
+        },
+        {
+          "row": 3,
+          "col": "a"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "SW1",
+      "kind": "button",
+      "legs": [
+        {
+          "row": 3,
+          "col": "b"
+        },
+        {
+          "row": 5,
+          "col": "b"
+        }
+      ]
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 5,
+          "col": "c"
+        },
+        {
+          "row": 9,
+          "col": "c"
+        }
+      ],
+      "value": 100.0
+    },
+    {
+      "id": "C1",
+      "kind": "capacitor",
+      "legs": [
+        {
+          "row": 9,
+          "col": "d"
+        },
+        {
+          "row": 11,
+          "col": "d"
+        }
+      ],
+      "value": 0.0022
+    },
+    {
+      "id": "W2",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 11,
+          "col": "a"
+        },
+        {
+          "row": 11,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "R2",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 9,
+          "col": "e"
+        },
+        {
+          "row": 15,
+          "col": "e"
+        }
+      ],
+      "value": 470.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 15,
+          "col": "d"
+        },
+        {
+          "row": 16,
+          "col": "d"
+        }
+      ],
+      "color": "blue"
+    },
+    {
+      "id": "W3",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 16,
+          "col": "a"
+        },
+        {
+          "row": 16,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    }
+  ],
+  "expect": {
+    "pass": true,
+    "fault_parts": []
+  }
+}

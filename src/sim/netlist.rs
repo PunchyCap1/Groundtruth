@@ -1,7 +1,7 @@
 //! Circuit -> SPICE netlist. Every leg we want a current for gets a 0 V source
 //! in series, which ngspice reports as a branch current.
 
-use super::Netlist;
+use super::{Netlist, TRAN_OUT, TranState};
 use crate::circuit::{Circuit, Kind};
 use anyhow::{Result, anyhow, bail};
 use std::fmt::Write;
@@ -21,7 +21,17 @@ const NPN_MODEL: &str = ".model Q2N3904 NPN(IS=6.734f XTI=3 EG=1.11 VAF=74.03 BF
 XTB=1.5 BR=.7371 NC=2 ISC=0 IKR=0 RC=1 CJC=3.638p MJC=.3085 VJC=.75 FC=.5 CJE=4.493p MJE=.2593 VJE=.75 TR=239.5n TF=301.2p \
 ITF=.4 VTF=4 XTF=2 RB=10)";
 
+/// DC operating point.
 pub fn build(circuit: &Circuit) -> Result<Netlist> {
+    build_with(circuit, None)
+}
+
+/// A transient chunk of `dt` seconds starting from `state` (capacitor charge and node voltages).
+pub fn build_tran(circuit: &Circuit, state: &TranState, dt: f64) -> Result<Netlist> {
+    build_with(circuit, Some((state, dt)))
+}
+
+fn build_with(circuit: &Circuit, tran: Option<(&TranState, f64)>) -> Result<Netlist> {
     let batteries: Vec<_> = circuit.parts.iter().filter(|p| p.kind == Kind::Battery).collect();
     let first = batteries.first().ok_or_else(|| anyhow!("Add a battery to power the circuit."))?;
     for b in &batteries {
@@ -72,14 +82,21 @@ pub fn build(circuit: &Circuit) -> Result<Netlist> {
             Kind::Battery => unreachable!(),
             Kind::Resistor => writeln!(spice, "R_{id} {} {} {}", pins[0], pins[1], part.value.unwrap_or(220.0).max(1e-3))?,
             Kind::Wire => writeln!(spice, "R_{id} {} {} 1m", pins[0], pins[1])?,
-            Kind::Button => {
+            Kind::Ldr => writeln!(spice, "R_{id} {} {} {}", pins[0], pins[1], part.ldr_ohms())?,
+            Kind::Button | Kind::Switch => {
                 let r = if part.pressed { "1m" } else { "1e12" };
                 writeln!(spice, "R_{id} {} {} {r}", pins[0], pins[1])?
             }
-            Kind::Capacitor => {
-                writeln!(spice, "C_{id} {} {} {}", pins[0], pins[1], part.value.unwrap_or(1e-6))?;
-                nl.notes.push(format!("{id}: capacitors are open circuits in a DC operating point."));
-            }
+            Kind::Capacitor => match tran {
+                Some((state, _)) => {
+                    let v0 = state.cap_v.get(id).copied().unwrap_or(0.0);
+                    writeln!(spice, "C_{id} {} {} {} IC={v0}", pins[0], pins[1], part.value.unwrap_or(1e-6))?;
+                }
+                None => {
+                    writeln!(spice, "C_{id} {} {} {}", pins[0], pins[1], part.value.unwrap_or(1e-6))?;
+                    nl.notes.push(format!("{id}: capacitors are open circuits in a DC operating point."));
+                }
+            },
             Kind::Led => {
                 let (name, model) = led_model(part.color.as_deref().unwrap_or("red"));
                 writeln!(spice, "D_{id} {} {} {name}", pins[0], pins[1])?;
@@ -107,7 +124,19 @@ pub fn build(circuit: &Circuit) -> Result<Netlist> {
     for m in models {
         writeln!(spice, "{m}")?;
     }
-    spice.push_str(".control\nop\nprint all\n.endc\n.end\n");
+    match tran {
+        None => spice.push_str(".control\nop\nprint all\n.endc\n.end\n"),
+        Some((state, dt)) => {
+            // Start from where the last chunk ended; nets that are new since then start at 0 V.
+            for (node, net) in &nl.node_to_net {
+                if let (false, Some(v)) = (node == "0", state.net_v.get(net)) {
+                    writeln!(spice, ".ic v({node})={v}")?;
+                }
+            }
+            let step = dt / 100.0;
+            writeln!(spice, ".control\nset wr_singlescale\nset wr_vecnames\ntran {step} {dt} 0 {step} uic\nwrdata {TRAN_OUT} all\n.endc\n.end")?;
+        }
+    }
     nl.spice = spice;
     Ok(nl)
 }

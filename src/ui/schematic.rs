@@ -233,7 +233,7 @@ fn symbol(painter: &Painter, part: &Part, c: Pos2, u: Vec2, len: f32, stroke: St
     let (a, b) = (c - u * len * 0.5, c + u * len * 0.5);
     match part.kind {
         Kind::Wire => {}
-        Kind::Resistor | Kind::Pot => {
+        Kind::Resistor | Kind::Pot | Kind::Ldr => {
             let steps = 6;
             let mut pts = vec![a];
             for k in 0..steps {
@@ -249,6 +249,25 @@ fn symbol(painter: &Painter, part: &Part, c: Pos2, u: Vec2, len: f32, stroke: St
                 painter.line_segment([c + n * len * 0.32, tip], stroke);
                 arrow_head(painter, tip, -n, len * 0.12, stroke);
             }
+            if part.kind == Kind::Ldr {
+                // Incoming light arrows.
+                let thin = Stroke::new(1.2, stroke.color);
+                let d = (-n + u * 0.3).normalized();
+                for k in [-0.1, 0.08] {
+                    let e = c + n * len * 0.22 + u * len * k;
+                    painter.line_segment([e - d * len * 0.22, e], thin);
+                    arrow_head(painter, e, d, len * 0.08, thin);
+                }
+            }
+        }
+        Kind::Switch => {
+            let (d0, d1) = (c - u * len * 0.25, c + u * len * 0.25);
+            painter.line_segment([a, d0], stroke);
+            painter.line_segment([d1, b], stroke);
+            painter.circle_stroke(d0, 3.0, stroke);
+            painter.circle_stroke(d1, 3.0, stroke);
+            let end = if part.pressed { d1 } else { d1 - n * len * 0.3 };
+            painter.line_segment([d0, end], stroke);
         }
         Kind::Battery => {
             painter.line_segment([a, c - u * len * 0.08], stroke);

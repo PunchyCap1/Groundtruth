@@ -109,10 +109,10 @@ fn layout(g: &Geom, part: &Part) -> Shape2 {
         // A pack near the start of the rails parks in the margin left of the board.
         Kind::Battery if part.legs.iter().all(|h| h.col.is_rail() && h.row <= 3) => (pos2(g.origin.x - p * 3.0, mid.y), p * 1.2),
         Kind::Battery => (mid + normal * p * 1.9, p * 1.2),
-        Kind::Led | Kind::Capacitor => (mid + normal * p * 0.6, p * 0.6),
+        Kind::Led | Kind::Capacitor | Kind::Ldr => (mid + normal * p * 0.6, p * 0.6),
         Kind::Npn => (legs[1] + normal * p * 0.55, p * 1.2),
         Kind::Pot => (legs[1] + normal * p * 0.7, p * 1.4),
-        Kind::Button => (mid, p * 0.9),
+        Kind::Button | Kind::Switch => (mid, p * 0.9),
         _ => (mid, p * 0.4),
     };
     Shape2 { legs, mid, dir, normal, body, body_r }
@@ -497,6 +497,27 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
             let cap = if part.pressed { theme::AMBER } else { Color32::from_gray(90) };
             painter.circle_filled(s.body, p * (if part.pressed { 0.42 } else { 0.5 }), a(cap));
         }
+        Kind::Ldr => {
+            // Face brightens with the light level; the serpentine track is the sensor.
+            let face = lerp(Color32::from_rgb(0x5a, 0x48, 0x30), Color32::from_rgb(0xf0, 0xd8, 0x9a), part.light as f32);
+            painter.circle_filled(s.body, p * 0.55, a(face));
+            painter.circle_stroke(s.body, p * 0.55, Stroke::new(1.0, a(Color32::from_gray(60))));
+            let track = Stroke::new(p * 0.07, a(Color32::from_rgb(0xa0, 0x30, 0x20)));
+            let pts: Vec<Pos2> = (0..=5)
+                .map(|k| s.body + dir * p * (k as f32 * 0.16 - 0.4) + normal * p * if k % 2 == 0 { 0.3 } else { -0.3 })
+                .collect();
+            painter.add(Shape::line(pts, track));
+        }
+        Kind::Switch => {
+            let along = if dir.x.abs() > dir.y.abs() { vec2(p * 2.0, p * 1.1) } else { vec2(p * 1.1, p * 2.0) };
+            let r = Rect::from_center_size(s.body, along);
+            painter.rect_filled(r, 3, a(Color32::from_gray(40)));
+            painter.rect_stroke(r, 3, Stroke::new(1.0, a(Color32::from_gray(90))), StrokeKind::Inside);
+            // Knob sits toward leg 1 when on.
+            let knob = s.body + dir * p * if part.pressed { 0.4 } else { -0.4 };
+            let color = if part.pressed { theme::AMBER } else { Color32::from_gray(150) };
+            painter.rect_filled(Rect::from_center_size(knob, Vec2::splat(p * 0.7)), 2, a(color));
+        }
         Kind::Pot => {
             let r = Rect::from_center_size(s.body, vec2(p * 2.8, p * 2.0).abs().max(Vec2::splat(p)));
             let r = if dir.x.abs() > dir.y.abs() { r } else { Rect::from_center_size(s.body, vec2(p * 2.0, p * 2.8)) };
@@ -533,7 +554,7 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
     if part.kind != Kind::Wire {
         let tag_at = match part.kind {
             Kind::Battery => s.body + vec2(0.0, p * 1.6),
-            Kind::Led | Kind::Capacitor => s.body + normal * (s.body_r + p * 0.45),
+            Kind::Led | Kind::Capacitor | Kind::Ldr => s.body + normal * (s.body_r + p * 0.45),
             Kind::Npn => s.legs[1] + normal * p * 1.75,
             _ => mid - normal * p * 0.75,
         };
@@ -542,8 +563,8 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
     }
     if let (true, Some(i)) = (readouts, current) {
         let i = if part.kind == Kind::Battery { -i } else { i };
-        let show = matches!(part.kind, Kind::Resistor | Kind::Led | Kind::Diode | Kind::Npn | Kind::Battery)
-            || (part.kind == Kind::Button && part.pressed);
+        let show = matches!(part.kind, Kind::Resistor | Kind::Led | Kind::Diode | Kind::Npn | Kind::Battery | Kind::Ldr | Kind::Capacitor)
+            || (matches!(part.kind, Kind::Button | Kind::Switch) && part.pressed);
         if show {
             let at = match part.kind {
                 Kind::Battery => s.body - vec2(0.0, p * 1.7),
@@ -663,6 +684,19 @@ pub fn icon(painter: &Painter, r: Rect, kind: Kind) {
             painter.line_segment([c + vec2(-w * 0.1, 0.0), c + vec2(-w * 0.1, w * 0.4)], lead);
             painter.line_segment([c + vec2(w * 0.1, 0.0), c + vec2(w * 0.1, w * 0.4)], lead);
             painter.circle_filled(c - vec2(0.0, w * 0.05), w * 0.2, Color32::from_rgb(0xd8, 0x8a, 0x2a));
+        }
+        Kind::Ldr => {
+            painter.line_segment([c + vec2(-w * 0.1, 0.0), c + vec2(-w * 0.1, w * 0.4)], lead);
+            painter.line_segment([c + vec2(w * 0.1, 0.0), c + vec2(w * 0.1, w * 0.4)], lead);
+            let face = c - vec2(0.0, w * 0.05);
+            painter.circle_filled(face, w * 0.22, Color32::from_rgb(0xf0, 0xd8, 0x9a));
+            let pts: Vec<Pos2> =
+                (0..=5).map(|k| face + vec2(w * (k as f32 * 0.06 - 0.15), if k % 2 == 0 { -w * 0.1 } else { w * 0.1 })).collect();
+            painter.add(Shape::line(pts, Stroke::new(1.2, Color32::from_rgb(0xa0, 0x30, 0x20))));
+        }
+        Kind::Switch => {
+            painter.rect_filled(Rect::from_center_size(c, vec2(w * 0.62, w * 0.32)), 3, Color32::from_gray(40));
+            painter.rect_filled(Rect::from_center_size(c + vec2(w * 0.12, 0.0), Vec2::splat(w * 0.2)), 2, theme::AMBER);
         }
         Kind::Npn => {
             for x in [-0.15, 0.0, 0.15] {

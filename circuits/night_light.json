@@ -1,0 +1,179 @@
+{
+  "name": "Night light",
+  "description": "R2 and LDR1 form a divider that feeds Q1's base through W3. In the dark LDR1's resistance is high, so Q1 turns LED1 on. Select LDR1 and drag its Light slider up to switch it off. S1 is the lamp's on/off switch.",
+  "rows": 30,
+  "parts": [
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 3,
+          "col": "L+"
+        },
+        {
+          "row": 3,
+          "col": "a"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "S1",
+      "kind": "switch",
+      "legs": [
+        {
+          "row": 3,
+          "col": "b"
+        },
+        {
+          "row": 5,
+          "col": "b"
+        }
+      ],
+      "pressed": true
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 5,
+          "col": "c"
+        },
+        {
+          "row": 9,
+          "col": "c"
+        }
+      ],
+      "value": 330.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 9,
+          "col": "d"
+        },
+        {
+          "row": 10,
+          "col": "d"
+        }
+      ],
+      "color": "yellow"
+    },
+    {
+      "id": "Q1",
+      "kind": "npn",
+      "legs": [
+        {
+          "row": 10,
+          "col": "e"
+        },
+        {
+          "row": 11,
+          "col": "e"
+        },
+        {
+          "row": 12,
+          "col": "e"
+        }
+      ]
+    },
+    {
+      "id": "W2",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 12,
+          "col": "a"
+        },
+        {
+          "row": 12,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "W3",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 11,
+          "col": "c"
+        },
+        {
+          "row": 20,
+          "col": "c"
+        }
+      ],
+      "color": "yellow"
+    },
+    {
+      "id": "R2",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 20,
+          "col": "L+"
+        },
+        {
+          "row": 20,
+          "col": "a"
+        }
+      ],
+      "value": 47000.0
+    },
+    {
+      "id": "LDR1",
+      "kind": "ldr",
+      "legs": [
+        {
+          "row": 20,
+          "col": "d"
+        },
+        {
+          "row": 22,
+          "col": "d"
+        }
+      ],
+      "light": 0.1
+    },
+    {
+      "id": "W4",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 22,
+          "col": "a"
+        },
+        {
+          "row": 22,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    }
+  ],
+  "expect": {
+    "pass": true,
+    "fault_parts": []
+  }
+}
