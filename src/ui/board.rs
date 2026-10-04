@@ -41,12 +41,18 @@ pub struct Out {
     pub notice: Option<String>,
 }
 
-pub const BOARD: Color32 = Color32::from_rgb(0xec, 0xe8, 0xdd);
-const HOLE: Color32 = Color32::from_rgb(0x4a, 0x48, 0x44);
-const LEAD: Color32 = Color32::from_rgb(0xa8, 0xad, 0xb3);
-pub const RAIL_RED: Color32 = Color32::from_rgb(0xd6, 0x45, 0x3d);
-pub const RAIL_BLUE: Color32 = Color32::from_rgb(0x3d, 0x6f, 0xd6);
-const INK: Color32 = Color32::from_gray(50);
+const HOLE: Color32 = Color32::from_gray(0x55);
+const LEAD: Color32 = theme::DIM;
+/// Positive side of rails, battery leads and symbols.
+pub const PLUS: Color32 = Color32::from_rgb(0xd8, 0x4a, 0x3e);
+/// Negative side.
+pub const MINUS: Color32 = Color32::from_rgb(0x44, 0x78, 0xd8);
+/// Flat body colors, close to the real parts.
+const RESISTOR: Color32 = Color32::from_rgb(0xc9, 0xa8, 0x7c);
+const CERAMIC: Color32 = Color32::from_rgb(0xd0, 0x8a, 0x3a);
+const POT: Color32 = Color32::from_rgb(0x2f, 0x5f, 0xb8);
+const BLACK_PART: Color32 = Color32::from_gray(0x22);
+const PART_EDGE: Color32 = Color32::from_gray(0x66);
 
 /// Vertical slot (in hole pitches) for each column. Board is drawn landscape:
 /// rows run left to right, the L rails sit on top.
@@ -116,11 +122,6 @@ fn layout(g: &Geom, part: &Part) -> Shape2 {
         _ => (mid, p * 0.4),
     };
     Shape2 { legs, mid, dir, normal, body, body_r }
-}
-
-/// True if `at` lies over the board body rather than the dark margin.
-fn board_contains(g: &Geom, at: Pos2) -> bool {
-    at.x > g.origin.x - g.p * 1.6 && at.y > g.origin.y - g.p * 1.6
 }
 
 fn seg_dist(m: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -226,36 +227,33 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
     let palette_hover = resp.dnd_hover_payload::<Kind>().map(|k| *k);
 
     // ---- Board ---------------------------------------------------------------
+    // The frame reports the rule checks: accent when passing, alert on a fault.
     let outline = match view.checks {
-        Some(c) if c.pass => theme::GREEN,
-        Some(_) => theme::RED,
-        None => theme::EDGE,
+        Some(c) if !c.pass => theme::ALERT,
+        Some(_) if !circuit.parts.is_empty() => theme::ACCENT,
+        _ => theme::EDGE,
     };
-    if view.checks.is_some() && !circuit.parts.is_empty() {
-        painter.rect_filled(board_rect.expand(6.0), 14, outline.gamma_multiply(0.14));
-    }
-    painter.rect_filled(board_rect, 10, BOARD);
-    painter.rect_stroke(board_rect, 10, Stroke::new(3.0, outline), StrokeKind::Outside);
+    painter.rect_stroke(board_rect, 0, Stroke::new(1.0, outline), StrokeKind::Outside);
 
-    // Rail stripes and the center trench.
+    // Rail rules and the center trench.
     let x0 = g.origin.x + p * 0.5;
     let x1 = g.origin.x + (circuit.rows as f32 + 0.5) * p;
-    for (y, c) in [(-0.6, RAIL_RED), (1.6, RAIL_BLUE), (14.6, RAIL_BLUE), (16.8, RAIL_RED)] {
+    for (y, c) in [(-0.6, PLUS), (1.6, MINUS), (14.6, MINUS), (16.8, PLUS)] {
         let y = g.origin.y + y * p;
-        painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(p * 0.08, c));
+        painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, c));
     }
-    let trench = Rect::from_min_max(pos2(x0, g.origin.y + 7.4 * p), pos2(x1, g.origin.y + 8.6 * p));
-    painter.rect_filled(trench, 2, Color32::from_rgb(0xdb, 0xd6, 0xca));
+    let trench = g.origin.y + 8.1 * p;
+    painter.extend(Shape::dashed_line(&[pos2(x0, trench), pos2(x1, trench)], Stroke::new(1.0, theme::EDGE), 3.0, 5.0));
 
     // Silkscreen.
-    let silk = Color32::from_gray(0x8a);
-    let font = FontId::monospace((p * 0.42).clamp(8.0, 14.0));
+    let silk = theme::LOW;
+    let font = FontId::monospace((p * 0.4).clamp(8.0, 13.0));
     for c in Col::STRIP {
         let y = g.origin.y + slot(c) * p;
         painter.text(pos2(g.origin.x - p * 0.1, y), Align2::RIGHT_CENTER, c.name(), font.clone(), silk);
         painter.text(pos2(x1 + p * 0.6, y), Align2::LEFT_CENTER, c.name(), font.clone(), silk);
     }
-    for (c, color) in [(Col::LPlus, RAIL_RED), (Col::LMinus, RAIL_BLUE), (Col::RMinus, RAIL_BLUE), (Col::RPlus, RAIL_RED)] {
+    for (c, color) in [(Col::LPlus, PLUS), (Col::LMinus, MINUS), (Col::RMinus, MINUS), (Col::RPlus, PLUS)] {
         let sign = if matches!(c, Col::LPlus | Col::RPlus) { "+" } else { "−" };
         let y = g.origin.y + slot(c) * p;
         painter.text(pos2(x1 + p * 0.6, y), Align2::LEFT_CENTER, sign, font.clone(), color);
@@ -266,15 +264,15 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
         painter.text(pos2(x, g.origin.y + 14.0 * p), Align2::CENTER_CENTER, row.to_string(), font.clone(), silk);
     }
 
-    // Holes, with net tracing on hover.
+    // Holes as a dot grid, with net tracing on hover.
     let hovered_hole = pointer.filter(|m| rect.contains(*m)).and_then(|m| g.nearest(m));
     let hovered_net = hovered_hole.map(|h| h.net_key());
     for h in circuit.holes() {
         let c = g.hole(h);
         if hovered_net.as_deref() == Some(h.net_key().as_str()) {
-            painter.rect_filled(Rect::from_center_size(c, Vec2::splat(p * 0.8)), 2, theme::CYAN.gamma_multiply(0.35));
+            painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(p * 0.6)), 0, Stroke::new(1.0, theme::ACCENT), StrokeKind::Middle);
         }
-        painter.rect_filled(Rect::from_center_size(c, Vec2::splat(p * 0.36)), 1, HOLE);
+        painter.circle_filled(c, (p * 0.07).max(1.0), HOLE);
     }
 
     // ---- Parts ---------------------------------------------------------------
@@ -293,7 +291,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
         if let Some(part) = circuit.part(id) {
             let s = layout(&g, part);
             let r = Rect::from_points(&[s.legs.clone(), vec![s.body]].concat()).expand(p * 0.7);
-            painter.rect_stroke(r, 6, Stroke::new(2.0, theme::AMBER.gamma_multiply(0.5 + 0.5 * pulse)), StrokeKind::Outside);
+            painter.rect_stroke(r, 0, Stroke::new(1.0, theme::HI.gamma_multiply(0.4 + 0.6 * pulse)), StrokeKind::Outside);
             ui.ctx().request_repaint();
         }
     }
@@ -302,7 +300,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
     if let Some(checks) = view.checks {
         for f in checks.findings.iter().filter(|f| f.severity == Severity::Fault) {
             for h in &f.highlight {
-                painter.circle_stroke(g.hole(*h), p * (0.55 + 0.15 * pulse), Stroke::new(2.5, theme::RED.gamma_multiply(0.5 + 0.5 * pulse)));
+                painter.circle_stroke(g.hole(*h), p * (0.5 + 0.15 * pulse), Stroke::new(1.5, theme::ALERT.gamma_multiply(0.4 + 0.6 * pulse)));
             }
         }
         if view.show_fix {
@@ -311,13 +309,13 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
                 let mut ghost = part.clone();
                 for (leg, to) in &fix.moves {
                     if let Some(l) = ghost.legs.get_mut(*leg) {
-                        painter.extend(Shape::dashed_line(&[g.hole(*l), g.hole(*to)], Stroke::new(2.0, theme::GREEN), 5.0, 4.0));
+                        painter.extend(Shape::dashed_line(&[g.hole(*l), g.hole(*to)], Stroke::new(1.0, theme::ACCENT), 4.0, 4.0));
                         *l = *to;
                     }
                 }
                 draw_part(&painter, &g, &ghost, None, false, false, 0.45);
                 for (_, to) in &fix.moves {
-                    painter.circle_stroke(g.hole(*to), p * 0.5, Stroke::new(2.0, theme::GREEN));
+                    painter.circle_stroke(g.hole(*to), p * 0.45, Stroke::new(1.0, theme::ACCENT));
                 }
             }
         }
@@ -330,31 +328,31 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
     if let (Some(Drag::NewWire { from }), Some(m)) = (&ed.drag, pointer) {
         let target = g.nearest(m).filter(|h| h != from && circuit.occupant(*h).is_none());
         let end = target.map(|h| g.hole(h)).unwrap_or(m);
-        painter.line_segment([g.hole(*from), end], Stroke::new(p * 0.26, theme::AMBER.gamma_multiply(0.8)));
-        painter.circle_filled(g.hole(*from), p * 0.2, theme::AMBER);
+        painter.line_segment([g.hole(*from), end], Stroke::new(p * 0.13, theme::HI));
+        painter.circle_filled(g.hole(*from), p * 0.13, theme::HI);
         if let Some(h) = target {
-            painter.circle_stroke(g.hole(h), p * 0.45, Stroke::new(2.0, theme::AMBER));
+            painter.circle_stroke(g.hole(h), p * 0.4, Stroke::new(1.0, theme::HI));
         }
     }
     if let (Some(kind), Some(at)) = (palette_hover, hovered_hole) {
         let mut probe = circuit.clone();
         let fits = probe.add(kind, at);
-        let color = if fits.is_some() { theme::GREEN } else { theme::RED };
+        let color = if fits.is_some() { theme::ACCENT } else { theme::ALERT };
         match fits.and_then(|id| probe.part(&id).cloned()) {
             Some(ghost) => {
                 draw_part(&painter, &g, &ghost, None, false, false, 0.55);
                 for l in &ghost.legs {
-                    painter.circle_stroke(g.hole(*l), p * 0.45, Stroke::new(2.0, color));
+                    painter.circle_stroke(g.hole(*l), p * 0.4, Stroke::new(1.0, color));
                 }
             }
             None => {
-                painter.circle_stroke(g.hole(at), p * 0.45, Stroke::new(2.0, color));
+                painter.circle_stroke(g.hole(at), p * 0.4, Stroke::new(1.0, color));
             }
         }
     }
 
     if circuit.parts.is_empty() && palette_hover.is_none() {
-        empty_hint(&painter, board_rect, "Drag a battery from the parts bin to get started");
+        empty_hint(&painter, board_rect, "drag a battery from the parts bin to start");
     }
 
     // ---- Hover info ----------------------------------------------------------
@@ -389,10 +387,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
 }
 
 fn empty_hint(painter: &Painter, rect: Rect, text: &str) {
-    let galley = painter.layout_no_wrap(text.into(), FontId::monospace(13.0), theme::TEXT);
-    let r = Rect::from_center_size(rect.center(), galley.size() + vec2(28.0, 18.0));
-    painter.rect_filled(r, 6, theme::BG.gamma_multiply(0.85));
-    painter.galley(r.center() - galley.size() * 0.5, galley, theme::TEXT);
+    painter.text(rect.center(), Align2::CENTER_CENTER, text, FontId::monospace(12.0), theme::DIM);
 }
 
 fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, readouts: bool, selected: bool, alpha: f32) {
@@ -402,25 +397,24 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
     let current = sim.and_then(|s| s.current(&part.id));
     let (p0, p1) = (s.legs[0], *s.legs.last().unwrap());
     let (mid, dir, normal) = (s.mid, s.dir, s.normal);
-    let tag_font = FontId::monospace((p * 0.42).clamp(9.0, 13.0));
-    let small = FontId::monospace((p * 0.34).clamp(8.0, 11.0));
-
-    if selected {
-        let glow = Stroke::new(p * 0.5, theme::AMBER.gamma_multiply(0.35));
-        for l in &s.legs {
-            painter.line_segment([*l, s.body], glow);
-        }
-        painter.circle_filled(s.body, s.body_r + p * 0.25, theme::AMBER.gamma_multiply(0.25));
-    }
+    let tag_font = FontId::monospace((p * 0.4).clamp(9.0, 12.0));
+    let small = FontId::monospace((p * 0.32).clamp(8.0, 10.0));
+    // Flat bodies in the parts' real colors; dark ones get a grey edge, the selected part a white one.
+    let ink = a(if selected { theme::HI } else { theme::TEXT });
+    let edge = |dark: bool| match (selected, dark) {
+        (true, _) => Stroke::new(1.0, theme::HI),
+        (false, true) => Stroke::new(1.0, a(PART_EDGE)),
+        (false, false) => Stroke::NONE,
+    };
 
     // Leads.
-    let lead = Stroke::new(p * 0.09, a(LEAD));
+    let lead = Stroke::new(1.0, a(LEAD));
     match part.kind {
         Kind::Wire => {}
         Kind::Battery => {
-            for (l, c) in s.legs.iter().zip([RAIL_RED, Color32::from_gray(35)]) {
-                painter.line_segment([*l, s.body], Stroke::new(p * 0.2, a(c)));
-                painter.circle_filled(*l, p * 0.18, a(c));
+            for (l, c) in s.legs.iter().zip([PLUS, Color32::from_gray(0x77)]) {
+                painter.line_segment([*l, s.body], Stroke::new(1.0, a(c)));
+                painter.circle_filled(*l, p * 0.12, a(c));
             }
         }
         Kind::Pot | Kind::Npn => {
@@ -439,92 +433,83 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
 
     match part.kind {
         Kind::Wire => {
-            let color = wire_color(part.color.as_deref());
-            painter.line_segment([p0, p1], Stroke::new(p * 0.26, a(color)));
+            let color = a(wire_color(part.color.as_deref()));
+            let w = if selected { p * 0.2 } else { p * 0.13 };
+            painter.line_segment([p0, p1], Stroke::new(w, color));
             for q in [p0, p1] {
-                painter.circle_filled(q, p * 0.2, a(color));
+                painter.circle_filled(q, p * 0.13, color);
             }
         }
         Kind::Battery => {
             let r = Rect::from_center_size(s.body, vec2(p * 2.2, p * 2.4));
-            painter.rect_filled(r, 4, a(Color32::from_rgb(0x24, 0x28, 0x2e)));
-            painter.rect_stroke(r, 4, Stroke::new(1.0, a(theme::AMBER)), StrokeKind::Inside);
+            painter.rect(r, 0, a(BLACK_PART), edge(true), StrokeKind::Inside);
             let v = part.value.map(|v| fmt_si(v, "V")).unwrap_or("V?".into());
-            painter.text(r.center(), Align2::CENTER_CENTER, v.replace(' ', ""), tag_font.clone(), a(theme::AMBER));
+            painter.text(r.center(), Align2::CENTER_CENTER, v.replace(' ', ""), tag_font.clone(), ink);
             painter.text(r.center_top() + vec2(0.0, p * 0.35), Align2::CENTER_CENTER, "+ −", small.clone(), a(theme::DIM));
         }
         Kind::Resistor | Kind::Diode => {
-            let len = ((p1 - p0).length() * 0.55).min(p * 2.6);
+            let len = ((p1 - p0).length() * 0.55).min(p * 2.4);
+            let w = p * 0.5;
             let (b0, b1) = (mid - dir * len * 0.5, mid + dir * len * 0.5);
-            let w = p * 0.6;
-            let body = if part.kind == Kind::Resistor { Color32::from_rgb(0xd9, 0xb9, 0x8a) } else { Color32::from_gray(30) };
-            painter.line_segment([b0, b1], Stroke::new(w, a(body)));
-            painter.circle_filled(b0, w * 0.5, a(body));
-            painter.circle_filled(b1, w * 0.5, a(body));
-            if part.kind == Kind::Resistor {
+            let body = vec![b0 + normal * w * 0.5, b1 + normal * w * 0.5, b1 - normal * w * 0.5, b0 - normal * w * 0.5];
+            let resistor = part.kind == Kind::Resistor;
+            painter.add(Shape::convex_polygon(body, a(if resistor { RESISTOR } else { BLACK_PART }), edge(!resistor)));
+            if resistor {
                 if let Some(ohms) = part.value {
                     for (i, c) in bands(ohms).iter().enumerate() {
-                        let at = b0 + dir * len * (0.18 + 0.2 * i as f32);
-                        painter.line_segment([at - normal * w * 0.5, at + normal * w * 0.5], Stroke::new(p * 0.14, a(*c)));
+                        let at = b0 + dir * len * (0.22 + 0.2 * i as f32);
+                        painter.line_segment([at - normal * w * 0.5, at + normal * w * 0.5], Stroke::new(p * 0.12, a(*c)));
                     }
                 }
             } else {
                 // Cathode stripe toward leg 1.
-                let at = b1 - dir * len * 0.15;
-                painter.line_segment([at - normal * w * 0.5, at + normal * w * 0.5], Stroke::new(p * 0.16, a(Color32::from_gray(200))));
+                let at = b1 - dir * len * 0.2;
+                painter.line_segment([at - normal * w * 0.5, at + normal * w * 0.5], Stroke::new(p * 0.12, a(Color32::from_gray(0xcc))));
             }
         }
         Kind::Led => {
             let lit = brightness(current);
-            let (dark, bright) = led_colors(part.color.as_deref());
+            let (_, bright) = led_colors(part.color.as_deref());
+            let r = p * 0.5;
             if lit > 0.05 {
-                for k in 1..=4 {
-                    painter.circle_filled(s.body, p * (0.6 + 0.35 * k as f32), a(bright.gamma_multiply(0.12 * lit)));
-                }
+                painter.circle_stroke(s.body, r + p * 0.3, Stroke::new(1.0, a(bright.gamma_multiply(lit))));
             }
-            painter.circle_filled(s.body, p * 0.55, a(lerp(dark, bright, lit)));
-            painter.circle_stroke(s.body, p * 0.55, Stroke::new(1.0, a(Color32::from_gray(30))));
+            let edge = if lit > 0.05 { bright } else { bright.gamma_multiply(0.55) };
+            painter.circle(s.body, r, a(lerp(theme::BG, bright, lit)), Stroke::new(1.0, a(edge)));
             // Long leg (+) marker.
-            painter.text(p0 - dir * p * 0.55, Align2::CENTER_CENTER, "+", tag_font.clone(), a(RAIL_RED));
+            painter.text(p0 - dir * p * 0.55, Align2::CENTER_CENTER, "+", small.clone(), a(theme::DIM));
         }
         Kind::Capacitor => {
-            painter.circle_filled(s.body, p * 0.55, a(Color32::from_rgb(0xd8, 0x8a, 0x2a)));
-            painter.circle_stroke(s.body, p * 0.55, Stroke::new(1.0, a(Color32::from_gray(60))));
-        }
-        Kind::Button => {
-            let r = Rect::from_center_size(s.body, Vec2::splat(p * 1.5));
-            painter.rect_filled(r, 3, a(Color32::from_gray(40)));
-            let cap = if part.pressed { theme::AMBER } else { Color32::from_gray(90) };
-            painter.circle_filled(s.body, p * (if part.pressed { 0.42 } else { 0.5 }), a(cap));
+            painter.circle(s.body, p * 0.5, a(CERAMIC), edge(false));
         }
         Kind::Ldr => {
             // Face brightens with the light level; the serpentine track is the sensor.
-            let face = lerp(Color32::from_rgb(0x5a, 0x48, 0x30), Color32::from_rgb(0xf0, 0xd8, 0x9a), part.light as f32);
-            painter.circle_filled(s.body, p * 0.55, a(face));
-            painter.circle_stroke(s.body, p * 0.55, Stroke::new(1.0, a(Color32::from_gray(60))));
-            let track = Stroke::new(p * 0.07, a(Color32::from_rgb(0xa0, 0x30, 0x20)));
+            let face = lerp(Color32::from_rgb(0x6a, 0x48, 0x28), Color32::from_rgb(0xf0, 0xd0, 0x90), part.light as f32);
+            painter.circle(s.body, p * 0.55, a(face), edge(false));
             let pts: Vec<Pos2> = (0..=5)
-                .map(|k| s.body + dir * p * (k as f32 * 0.16 - 0.4) + normal * p * if k % 2 == 0 { 0.3 } else { -0.3 })
+                .map(|k| s.body + dir * p * (k as f32 * 0.16 - 0.4) + normal * p * if k % 2 == 0 { 0.25 } else { -0.25 })
                 .collect();
-            painter.add(Shape::line(pts, track));
+            painter.add(Shape::line(pts, Stroke::new(1.5, a(Color32::from_rgb(0xa8, 0x32, 0x22)))));
+        }
+        Kind::Button => {
+            let r = Rect::from_center_size(s.body, Vec2::splat(p * 1.5));
+            painter.rect(r, 0, a(BLACK_PART), edge(true), StrokeKind::Inside);
+            let cap = if part.pressed { theme::ACCENT } else { Color32::from_gray(0x88) };
+            painter.circle_filled(s.body, p * if part.pressed { 0.32 } else { 0.4 }, a(cap));
         }
         Kind::Switch => {
             let along = if dir.x.abs() > dir.y.abs() { vec2(p * 2.0, p * 1.1) } else { vec2(p * 1.1, p * 2.0) };
-            let r = Rect::from_center_size(s.body, along);
-            painter.rect_filled(r, 3, a(Color32::from_gray(40)));
-            painter.rect_stroke(r, 3, Stroke::new(1.0, a(Color32::from_gray(90))), StrokeKind::Inside);
+            painter.rect(Rect::from_center_size(s.body, along), 0, a(BLACK_PART), edge(true), StrokeKind::Inside);
             // Knob sits toward leg 1 when on.
-            let knob = s.body + dir * p * if part.pressed { 0.4 } else { -0.4 };
-            let color = if part.pressed { theme::AMBER } else { Color32::from_gray(150) };
-            painter.rect_filled(Rect::from_center_size(knob, Vec2::splat(p * 0.7)), 2, a(color));
+            let knob = Rect::from_center_size(s.body + dir * p * if part.pressed { 0.4 } else { -0.4 }, Vec2::splat(p * 0.6));
+            painter.rect_filled(knob, 0, a(if part.pressed { theme::ACCENT } else { Color32::from_gray(0x99) }));
         }
         Kind::Pot => {
-            let r = Rect::from_center_size(s.body, vec2(p * 2.8, p * 2.0).abs().max(Vec2::splat(p)));
-            let r = if dir.x.abs() > dir.y.abs() { r } else { Rect::from_center_size(s.body, vec2(p * 2.0, p * 2.8)) };
-            painter.rect_filled(r, 4, a(Color32::from_rgb(0x2f, 0x5f, 0xb8)));
-            painter.circle_filled(s.body, p * 0.75, a(Color32::from_gray(225)));
+            let size = if dir.x.abs() > dir.y.abs() { vec2(p * 2.8, p * 2.0) } else { vec2(p * 2.0, p * 2.8) };
+            painter.rect(Rect::from_center_size(s.body, size), 0, a(POT), edge(false), StrokeKind::Inside);
+            painter.circle_filled(s.body, p * 0.7, a(Color32::from_gray(0xdd)));
             let ang = (-225.0 + 270.0 * part.wiper as f32).to_radians();
-            painter.line_segment([s.body, s.body + vec2(ang.cos(), ang.sin()) * p * 0.7], Stroke::new(p * 0.14, a(INK)));
+            painter.line_segment([s.body, s.body + vec2(ang.cos(), ang.sin()) * p * 0.7], Stroke::new(1.5, a(BLACK_PART)));
         }
         Kind::Npn => {
             // TO-92: half disc with the flat face toward the legs.
@@ -536,9 +521,9 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
                 })
                 .collect();
             pts.push(s.legs[1] - normal * p * 0.25 - dir * p * 1.25);
-            painter.add(Shape::convex_polygon(pts, a(Color32::from_gray(35)), Stroke::NONE));
+            painter.add(Shape::convex_polygon(pts, a(BLACK_PART), edge(true)));
             for (l, n) in s.legs.iter().zip(["C", "B", "E"]) {
-                painter.text(*l + normal * p * 0.7, Align2::CENTER_CENTER, n, small.clone(), a(Color32::from_gray(200)));
+                painter.text(*l + normal * p * 0.7, Align2::CENTER_CENTER, n, small.clone(), a(theme::DIM));
             }
         }
     }
@@ -546,11 +531,11 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
     // Leg handles on the selected part.
     if selected {
         for l in &s.legs {
-            painter.circle_stroke(*l, p * 0.3, Stroke::new(2.0, theme::AMBER));
+            painter.rect_stroke(Rect::from_center_size(*l, Vec2::splat(p * 0.5)), 0, Stroke::new(1.0, theme::HI), StrokeKind::Middle);
         }
     }
 
-    // Id tag and live current, kept on opposite sides of the part.
+    // Id tag (with the value, for passives) and live current, kept on opposite sides of the part.
     if part.kind != Kind::Wire {
         let tag_at = match part.kind {
             Kind::Battery => s.body + vec2(0.0, p * 1.6),
@@ -558,8 +543,11 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
             Kind::Npn => s.legs[1] + normal * p * 1.75,
             _ => mid - normal * p * 0.75,
         };
-        let on_board = board_contains(g, tag_at);
-        painter.text(tag_at, Align2::CENTER_CENTER, &part.id, tag_font.clone(), a(if on_board { INK } else { theme::TEXT }));
+        let tag = match (part.kind, part.kind.unit(), part.value) {
+            (Kind::Resistor | Kind::Capacitor | Kind::Pot, Some(unit), Some(v)) => format!("{} {}", part.id, fmt_si(v, unit).replace(' ', "")),
+            _ => part.id.clone(),
+        };
+        painter.text(tag_at, Align2::CENTER_CENTER, tag, tag_font.clone(), a(if selected { theme::HI } else { theme::DIM }));
     }
     if let (true, Some(i)) = (readouts, current) {
         let i = if part.kind == Kind::Battery { -i } else { i };
@@ -571,22 +559,23 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
                 Kind::Led | Kind::Npn => mid - normal * p * 0.9,
                 _ => mid - normal * p * 1.6,
             };
-            let galley = painter.layout_no_wrap(format!("{:.2} mA", milliamps(i)), tag_font, a(theme::CYAN));
-            let r = Rect::from_center_size(at, galley.size() + vec2(8.0, 4.0));
-            painter.rect_filled(r, 3, a(theme::BG.gamma_multiply(0.9)));
-            painter.galley(r.min + vec2(4.0, 2.0), galley, theme::CYAN);
+            let galley = painter.layout_no_wrap(format!("{:.2}mA", milliamps(i)), small, a(theme::ACCENT));
+            let r = Rect::from_center_size(at, galley.size() + vec2(4.0, 0.0));
+            painter.rect_filled(r, 0, a(theme::BG));
+            painter.galley(r.min + vec2(2.0, 0.0), galley, theme::ACCENT);
         }
     }
 }
 
 pub fn wire_color(name: Option<&str>) -> Color32 {
     match name.unwrap_or("") {
+        // A "black" wire is drawn dark grey so it shows on the black board.
         "red" => Color32::from_rgb(0xd8, 0x3a, 0x30),
-        "black" => Color32::from_gray(35),
+        "black" => Color32::from_gray(0x55),
         "blue" => Color32::from_rgb(0x2f, 0x6c, 0xd8),
         "green" => Color32::from_rgb(0x2f, 0xa8, 0x5a),
         "yellow" => Color32::from_rgb(0xe8, 0xc2, 0x2e),
-        "white" => Color32::from_gray(235),
+        "white" => Color32::from_gray(0xeb),
         _ => Color32::from_rgb(0xe0, 0x8a, 0x2a),
     }
 }
@@ -635,73 +624,70 @@ pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
 }
 
-/// Small icon of a part for the palette.
+/// Small line drawing of a part, shown under the pointer while dragging from the parts bin.
 pub fn icon(painter: &Painter, r: Rect, kind: Kind) {
     let c = r.center();
     let w = r.width();
-    let lead = Stroke::new(1.5, LEAD);
+    let ink = Stroke::new(1.0, theme::TEXT);
+    let lead = Stroke::new(1.0, LEAD);
+    let fill = theme::BG;
+    let legs = |xs: &[f32], len: f32| {
+        for x in xs {
+            painter.line_segment([c + vec2(w * x, 0.0), c + vec2(w * x, w * len)], lead);
+        }
+    };
     match kind {
         Kind::Battery => {
             let b = Rect::from_center_size(c, vec2(w * 0.5, w * 0.62));
-            painter.rect_filled(b, 3, Color32::from_rgb(0x24, 0x28, 0x2e));
-            painter.rect_stroke(b, 3, Stroke::new(1.0, theme::AMBER), StrokeKind::Inside);
-            painter.text(c, Align2::CENTER_CENTER, "5V", FontId::monospace(9.0), theme::AMBER);
+            painter.rect(b, 0, fill, ink, StrokeKind::Inside);
+            painter.text(c, Align2::CENTER_CENTER, "5V", FontId::monospace(9.0), theme::TEXT);
         }
         Kind::Wire => {
+            let color = wire_color(Some("red"));
             let (a, b) = (c - vec2(w * 0.35, -w * 0.2), c + vec2(w * 0.35, -w * 0.2));
-            painter.line_segment([a, b], Stroke::new(3.5, wire_color(Some("red"))));
-            painter.circle_filled(a, 3.0, wire_color(Some("red")));
-            painter.circle_filled(b, 3.0, wire_color(Some("red")));
+            painter.line_segment([a, b], Stroke::new(2.0, color));
+            painter.circle_filled(a, 2.5, color);
+            painter.circle_filled(b, 2.5, color);
         }
         Kind::Resistor | Kind::Diode => {
             painter.line_segment([c - vec2(w * 0.42, 0.0), c + vec2(w * 0.42, 0.0)], lead);
-            let body = if kind == Kind::Resistor { Color32::from_rgb(0xd9, 0xb9, 0x8a) } else { Color32::from_gray(30) };
-            painter.line_segment([c - vec2(w * 0.2, 0.0), c + vec2(w * 0.2, 0.0)], Stroke::new(w * 0.2, body));
-            let bands: &[(f32, Color32)] = if kind == Kind::Resistor {
-                &[(-0.12, Color32::from_rgb(0xd0, 0x2a, 0x22)), (-0.02, Color32::from_rgb(0xd0, 0x2a, 0x22)), (0.08, Color32::from_rgb(0x7a, 0x45, 0x1e))]
-            } else {
-                &[(0.14, Color32::from_gray(200))]
-            };
-            for (x, col) in bands {
-                painter.line_segment([c + vec2(w * x, -w * 0.1), c + vec2(w * x, w * 0.1)], Stroke::new(2.0, *col));
+            let body = if kind == Kind::Resistor { RESISTOR } else { BLACK_PART };
+            painter.rect_filled(Rect::from_center_size(c, vec2(w * 0.42, w * 0.18)), 0, body);
+            if kind == Kind::Diode {
+                painter.line_segment([c + vec2(w * 0.12, -w * 0.09), c + vec2(w * 0.12, w * 0.09)], Stroke::new(2.0, theme::TEXT));
             }
         }
         Kind::Led => {
-            painter.line_segment([c + vec2(-w * 0.1, 0.0), c + vec2(-w * 0.1, w * 0.4)], lead);
-            painter.line_segment([c + vec2(w * 0.1, 0.0), c + vec2(w * 0.1, w * 0.3)], lead);
-            painter.circle_filled(c - vec2(0.0, w * 0.05), w * 0.22, Color32::from_rgb(0xff, 0x4a, 0x38));
-        }
-        Kind::Button => {
-            painter.rect_filled(Rect::from_center_size(c, Vec2::splat(w * 0.5)), 3, Color32::from_gray(40));
-            painter.circle_filled(c, w * 0.16, Color32::from_gray(110));
-        }
-        Kind::Pot => {
-            painter.rect_filled(Rect::from_center_size(c, vec2(w * 0.6, w * 0.5)), 3, Color32::from_rgb(0x2f, 0x5f, 0xb8));
-            painter.circle_filled(c, w * 0.17, Color32::from_gray(225));
-            painter.line_segment([c, c + vec2(-w * 0.1, -w * 0.12)], Stroke::new(2.0, INK));
+            legs(&[-0.1, 0.1], 0.4);
+            painter.circle(c - vec2(0.0, w * 0.05), w * 0.2, fill, Stroke::new(1.0, led_colors(Some("red")).1));
         }
         Kind::Capacitor => {
-            painter.line_segment([c + vec2(-w * 0.1, 0.0), c + vec2(-w * 0.1, w * 0.4)], lead);
-            painter.line_segment([c + vec2(w * 0.1, 0.0), c + vec2(w * 0.1, w * 0.4)], lead);
-            painter.circle_filled(c - vec2(0.0, w * 0.05), w * 0.2, Color32::from_rgb(0xd8, 0x8a, 0x2a));
+            legs(&[-0.1, 0.1], 0.4);
+            painter.circle_filled(c - vec2(0.0, w * 0.05), w * 0.2, CERAMIC);
         }
         Kind::Ldr => {
-            painter.line_segment([c + vec2(-w * 0.1, 0.0), c + vec2(-w * 0.1, w * 0.4)], lead);
-            painter.line_segment([c + vec2(w * 0.1, 0.0), c + vec2(w * 0.1, w * 0.4)], lead);
+            legs(&[-0.1, 0.1], 0.4);
             let face = c - vec2(0.0, w * 0.05);
-            painter.circle_filled(face, w * 0.22, Color32::from_rgb(0xf0, 0xd8, 0x9a));
+            painter.circle(face, w * 0.22, fill, ink);
             let pts: Vec<Pos2> =
-                (0..=5).map(|k| face + vec2(w * (k as f32 * 0.06 - 0.15), if k % 2 == 0 { -w * 0.1 } else { w * 0.1 })).collect();
-            painter.add(Shape::line(pts, Stroke::new(1.2, Color32::from_rgb(0xa0, 0x30, 0x20))));
+                (0..=5).map(|k| face + vec2(w * (k as f32 * 0.06 - 0.15), if k % 2 == 0 { -w * 0.08 } else { w * 0.08 })).collect();
+            painter.add(Shape::line(pts, ink));
+        }
+        Kind::Button => {
+            painter.rect(Rect::from_center_size(c, Vec2::splat(w * 0.5)), 0, fill, ink, StrokeKind::Inside);
+            painter.circle_stroke(c, w * 0.13, ink);
         }
         Kind::Switch => {
-            painter.rect_filled(Rect::from_center_size(c, vec2(w * 0.62, w * 0.32)), 3, Color32::from_gray(40));
-            painter.rect_filled(Rect::from_center_size(c + vec2(w * 0.12, 0.0), Vec2::splat(w * 0.2)), 2, theme::AMBER);
+            painter.rect(Rect::from_center_size(c, vec2(w * 0.62, w * 0.32)), 0, fill, ink, StrokeKind::Inside);
+            painter.rect_filled(Rect::from_center_size(c + vec2(w * 0.12, 0.0), Vec2::splat(w * 0.18)), 0, theme::TEXT);
+        }
+        Kind::Pot => {
+            painter.rect_filled(Rect::from_center_size(c, vec2(w * 0.6, w * 0.5)), 0, POT);
+            painter.circle_filled(c, w * 0.15, Color32::from_gray(0xdd));
+            painter.line_segment([c, c + vec2(-w * 0.1, -w * 0.12)], Stroke::new(1.5, BLACK_PART));
         }
         Kind::Npn => {
-            for x in [-0.15, 0.0, 0.15] {
-                painter.line_segment([c + vec2(w * x, 0.0), c + vec2(w * x, w * 0.4)], lead);
-            }
+            legs(&[-0.15, 0.0, 0.15], 0.4);
             let n = 12;
             let pts: Vec<Pos2> = (0..=n)
                 .map(|k| {
@@ -709,7 +695,7 @@ pub fn icon(painter: &Painter, r: Rect, kind: Kind) {
                     c + vec2(th.cos() * w * 0.27, -th.sin() * w * 0.27 + w * 0.05)
                 })
                 .collect();
-            painter.add(Shape::convex_polygon(pts, Color32::from_gray(35), Stroke::NONE));
+            painter.add(Shape::convex_polygon(pts, fill, ink));
         }
     }
 }
