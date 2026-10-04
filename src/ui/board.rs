@@ -284,7 +284,14 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
         let is_sel = Some(&part.id) == selected.as_ref();
         let mut shown = part.clone();
         shown.pressed |= view.held == Some(part.id.as_str());
-        draw_part(&painter, &g, &shown, view.sim, view.show_readouts, is_sel, 1.0);
+        draw_part(&painter, &g, &shown, view.sim, is_sel, 1.0);
+    }
+    if view.show_readouts {
+        for part in &circuit.parts {
+            let mut shown = part.clone();
+            shown.pressed |= view.held == Some(part.id.as_str());
+            draw_readout(&painter, &g, &shown, view.sim);
+        }
     }
 
     // Lab-partner callouts.
@@ -315,7 +322,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
                         *l = *to;
                     }
                 }
-                draw_part(&painter, &g, &ghost, None, false, false, 0.45);
+                draw_part(&painter, &g, &ghost, None, false, 0.45);
                 for (_, to) in &fix.moves {
                     painter.circle_stroke(g.hole(*to), p * 0.5, Stroke::new(2.0, theme::GREEN));
                 }
@@ -342,7 +349,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
         let color = if fits.is_some() { theme::GREEN } else { theme::RED };
         match fits.and_then(|id| probe.part(&id).cloned()) {
             Some(ghost) => {
-                draw_part(&painter, &g, &ghost, None, false, false, 0.55);
+                draw_part(&painter, &g, &ghost, None, false, 0.55);
                 for l in &ghost.legs {
                     painter.circle_stroke(g.hole(*l), p * 0.45, Stroke::new(2.0, color));
                 }
@@ -395,7 +402,7 @@ fn empty_hint(painter: &Painter, rect: Rect, text: &str) {
     painter.galley(r.center() - galley.size() * 0.5, galley, theme::TEXT);
 }
 
-fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, readouts: bool, selected: bool, alpha: f32) {
+fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, selected: bool, alpha: f32) {
     let p = g.p;
     let a = |c: Color32| c.gamma_multiply(alpha);
     let s = layout(g, part);
@@ -529,32 +536,50 @@ fn draw_part(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>, 
         }
     }
 
-    // Id tag and live current, kept on opposite sides of the part.
-    if part.kind != Kind::Wire {
+    // Id tag and live current, kept on opposite sides of the part. Ghosts (fix
+    // previews, drag previews) skip the tag so it doesn't overprint the real one.
+    if part.kind != Kind::Wire && alpha >= 1.0 {
         let tag_at = match part.kind {
             Kind::Battery => s.body + vec2(0.0, p * 1.6),
-            Kind::Led | Kind::Capacitor => s.body + normal * (s.body_r + p * 0.45),
+            Kind::Led | Kind::Capacitor | Kind::Button => s.body + normal * (s.body_r + p * 0.45),
             Kind::Npn => s.legs[1] + normal * p * 1.75,
             _ => mid - normal * p * 0.75,
         };
         let on_board = board_contains(g, tag_at);
         painter.text(tag_at, Align2::CENTER_CENTER, &part.id, tag_font.clone(), a(if on_board { INK } else { theme::TEXT }));
     }
-    if let (true, Some(i)) = (readouts, current) {
-        let i = if part.kind == Kind::Battery { -i } else { i };
-        let show = matches!(part.kind, Kind::Resistor | Kind::Led | Kind::Diode | Kind::Npn | Kind::Battery)
-            || (part.kind == Kind::Button && part.pressed);
-        if show {
-            let at = match part.kind {
-                Kind::Battery => s.body - vec2(0.0, p * 1.7),
-                Kind::Led | Kind::Npn => mid - normal * p * 0.9,
-                _ => mid - normal * p * 1.6,
-            };
-            let galley = painter.layout_no_wrap(format!("{:.2} mA", milliamps(i)), tag_font, a(theme::CYAN));
-            let r = Rect::from_center_size(at, galley.size() + vec2(8.0, 4.0));
-            painter.rect_filled(r, 3, a(theme::BG.gamma_multiply(0.9)));
-            painter.galley(r.min + vec2(4.0, 2.0), galley, theme::CYAN);
-        }
+}
+
+/// Live current tag. Drawn in a pass after every part so a neighbouring part's
+/// body can't cover it.
+fn draw_readout(painter: &Painter, g: &Geom, part: &Part, sim: Option<&SimResult>) {
+    let Some(i) = sim.and_then(|s| s.current(&part.id)) else { return };
+    let show = matches!(part.kind, Kind::Resistor | Kind::Led | Kind::Diode | Kind::Npn | Kind::Battery)
+        || (part.kind == Kind::Button && part.pressed);
+    if !show {
+        return;
+    }
+    let p = g.p;
+    let s = layout(g, part);
+    let at = match part.kind {
+        Kind::Battery => s.body - vec2(0.0, p * 1.7),
+        Kind::Led | Kind::Npn => s.mid - s.normal * p * 0.9,
+        _ => s.mid - s.normal * p * 1.6,
+    };
+    let font = FontId::monospace((p * 0.42).clamp(9.0, 13.0));
+    let galley = painter.layout_no_wrap(format!("{:.2} mA", milliamps(shown_current(part.kind, i))), font, theme::CYAN);
+    let r = Rect::from_center_size(at, galley.size() + vec2(8.0, 4.0));
+    painter.rect_filled(r, 3, theme::BG.gamma_multiply(0.9));
+    painter.galley(r.min + vec2(4.0, 2.0), galley, theme::CYAN);
+}
+
+/// Current as a learner should read it: what a battery supplies, and plain magnitude
+/// for parts with no polarity (a resistor's sign only reflects which leg is leg 0).
+pub fn shown_current(kind: Kind, i: f64) -> f64 {
+    match kind {
+        Kind::Battery => -i,
+        Kind::Resistor | Kind::Button | Kind::Wire | Kind::Pot | Kind::Capacitor => i.abs(),
+        _ => i,
     }
 }
 
