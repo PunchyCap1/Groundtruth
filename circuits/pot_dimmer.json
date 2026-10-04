@@ -1,0 +1,121 @@
+{
+  "name": "Pot dimmer",
+  "description": "Turn POT1's wiper to change the LED brightness.",
+  "rows": 30,
+  "parts": [
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 5,
+          "col": "L+"
+        },
+        {
+          "row": 5,
+          "col": "a"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "POT1",
+      "kind": "pot",
+      "legs": [
+        {
+          "row": 5,
+          "col": "e"
+        },
+        {
+          "row": 6,
+          "col": "e"
+        },
+        {
+          "row": 7,
+          "col": "e"
+        }
+      ],
+      "value": 1000.0,
+      "wiper": 0.3
+    },
+    {
+      "id": "W2",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 7,
+          "col": "a"
+        },
+        {
+          "row": 7,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 6,
+          "col": "c"
+        },
+        {
+          "row": 12,
+          "col": "c"
+        }
+      ],
+      "value": 220.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 12,
+          "col": "d"
+        },
+        {
+          "row": 13,
+          "col": "d"
+        }
+      ],
+      "color": "yellow"
+    },
+    {
+      "id": "W3",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 13,
+          "col": "a"
+        },
+        {
+          "row": 13,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    }
+  ],
+  "expect": {
+    "pass": true,
+    "fault_parts": []
+  }
+}

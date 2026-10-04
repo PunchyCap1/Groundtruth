@@ -1,66 +1,55 @@
 # Ground Truth
 
-An electronics bench assistant: photo of a breadboard → verified circuit model → fault shown on a virtual replica of the board. This is a hackathon project. Ship the demo path first, and polish later.
+A drag-and-drop breadboard playground for learning electronics. Users build circuits on a virtual breadboard, ngspice simulates them live, and a Gemini "lab partner" reviews the circuit, explains errors and suggests experiments. Friendly enough for a first LED, with enough depth (schematic view, SPICE netlist, transistors, pots) for experienced builders. This is a hackathon project. Ship the demo path first, and polish later.
 
-**Core principle:** the model sees, the simulator decides, the probes confirm. Vision models only label components. They never decide whether a circuit is correct, and they never handle geometry. Any verdict shown to the user must come from ngspice output or probe readings, never from model text.
+**Core principle:** the simulator supplies the numbers; Gemini supplies the teaching. Every voltage and current shown in the UI comes from ngspice. The rule checker (`src/sim/checks.rs`) reports faults from those numbers. Gemini is free to review, critique and suggest, but it gets the simulated numbers as context and is labeled as AI output in the UI. No image processing: the photo/OpenCV/YOLO pipeline was removed on 2026-10-03.
 
-## Pipeline
+## How it works
 
-1. **Grid mapping (OpenCV):** detect the breadboard and hole grid, then map every component leg to an exact (row, column).
-2. **Component ID:** labels parts (resistor value, LED polarity, chip markings). The output is structured JSON with the same schema in both modes:
-   - *Online:* Gemini API
-   - *Offline:* local YOLO model
-3. **Netlist + simulation:** combine the grid map and labels into a SPICE netlist and simulate with ngspice/PySpice. The verdict cites concrete numbers, e.g. "LED1 draws 0 mA because R1 is in row 14, not row 15."
-4. **Virtual board:** the desktop app renders a digital twin, highlights the fault, shows simulated currents and voltages, and previews the corrected placement.
-5. **Probing:** the Arduino UNO Q's MCU side reads real voltages to confirm the predictions.
+1. **Editor (`src/ui/board.rs`):** parts are dragged from the parts bin onto holes. Parts and single legs can be dragged; dragging from an empty hole draws a wire. Breadboard connectivity comes from `Hole::net_key` (a–e and f–j per row, plus four rails).
+2. **Simulation (`src/sim/`):** every edit rebuilds a SPICE netlist (`netlist.rs`), runs `ngspice -b` on a worker thread (`ngspice.rs`), and runs the rule checks (`checks.rs`). 0 V sources in series act as ammeters on legs.
+3. **Schematic (`src/ui/schematic.rs`):** generated from the same circuit. Wires merge nets, nets are stacked by simulated voltage, and selection syncs with the breadboard.
+4. **Lab partner (`src/assistant.rs`):** sends the circuit, nets, sim results, rule findings and netlist to Gemini, and gets structured JSON back (`message`, `issues` tied to part ids, `ideas`). Hovering an issue highlights its parts.
 
 ## Architecture
 
-- **Desktop app:** Rust (Tauri or egui, TBD). Handles photo upload, the virtual board, and explanations. Talks to the cluster over the LAN.
-- **Cluster:** one or many nodes. Each node joins the cluster and advertises its capabilities. A scheduler assigns pipeline stages to whatever is available. When a node drops, its tasks reroute to the others. A single node must always work on its own.
-  - Demo hardware: Raspberry Pi 5, Raspberry Pi 4 B, Arduino UNO Q. Real-time probe readings go to the UNO Q's microcontroller.
-- **Transport:** HTTP or MQTT (TBD).
-
-## Stack
-
-Rust, Python, OpenCV, Gemini API, YOLO (trained on Roboflow Universe breadboard datasets plus our own photos), ngspice/PySpice.
+- **Desktop app:** Rust + egui/eframe, a single binary. Keep the amber-on-dark "bench instrument" look (`src/ui/theme.rs`).
+- **Circuit files:** JSON (`src/circuit.rs` `Circuit`). Polar parts list leg 0 first (battery +, LED anode, NPN collector, pot end A).
+- **Hardware (later, tier 2):** Arduino UNO Q probing to compare a physical build against the simulation. Not started.
 
 ## Scope (in priority order)
 
-1. **Must have:** photo → grid map → Gemini labels → netlist → ngspice verdict → virtual board, on a single node, for 2–3 demo circuits.
-2. **Should have:** multi-node scheduling with failover, offline YOLO mode, UNO Q probe readings.
-3. **Stretch:** live camera mode, voice explanations via the Gemini Live API.
+1. **Must have:** drag-and-drop breadboard editor, live ngspice readouts and rule checks, Gemini review/chat, schematic view, example circuits, save/open.
+2. **Should have:** UNO Q probe readings vs. simulation, more parts (photoresistor, switch, 555), transient sim (blinking).
+3. **Stretch:** Gemini proposes circuits that load onto the board, voice via the Gemini Live API.
 
 Don't start tier 2 or 3 work while tier 1 is broken. When unsure, ask which tier a task belongs to.
 
 ## Demo script (keep this working)
 
-1. Build an LED circuit with a deliberate mistake.
-2. Scan it. Ground Truth flags the fault with simulated numbers and highlights it on the virtual board.
-3. Pull the network cable. Offline mode still works.
-4. Unplug a board mid-scan. The work reroutes without breaking.
-5. Fix the circuit and rescan. The board turns green.
+1. Open Examples → "LED, wrong row". The board outline is red, CHECKS shows the fault, and a green ghost shows the fix.
+2. Click "Why isn't it working?" Gemini explains the row gap and highlights R1/LED1.
+3. Click "Apply fix". The LED lights and the board turns green.
+4. Start from New: drag a battery, resistor, LED and wires. Readouts update live.
+5. Open "Transistor switch", select SW1, hold Space. The LED lights. Switch to SCHEMATIC.
 
 ## Repo layout
 
-<!-- TODO: fill in once the structure exists -->
-- `app/`: Rust desktop app
-- `node/`: Python cluster node (pipeline stages, scheduler client)
-- `vision/`: OpenCV grid mapping, YOLO model and training scripts
-- `sim/`: netlist builder and ngspice wrapper
-- `firmware/`: UNO Q probe code
-- `circuits/`: demo circuit photos and expected netlists
+- `src/circuit.rs`: holes, parts, circuits, SI value parsing
+- `src/sim/`: netlist builder, ngspice runner, rule checks
+- `src/assistant.rs`: Gemini lab partner
+- `src/ui/`: breadboard editor, schematic, theme
+- `src/app.rs`: panels, undo/redo, save/open, background sim and Gemini threads
+- `circuits/`: example circuits (compiled in), each with an `expect` block checked by tests
 
 ## Commands
 
-<!-- TODO: replace with real commands -->
-- Desktop app: `cd app && cargo run`
-- Node: `cd node && python -m groundtruth.node`
-- Tests: `cargo test` / `pytest`
+- App: `cargo run` (dev flags: `cargo run -- circuits/pot_dimmer.json --split`)
+- Tests: `cargo test` (needs `ngspice` on PATH for the simulation checks)
+- Live Gemini check: `cargo test gemini_live -- --ignored --nocapture`
 
 ## Conventions
 
-- Never commit API keys. The Gemini key comes from `GEMINI_API_KEY` in `.env`, which is gitignored.
-- Keep the online and offline component-ID outputs on one shared JSON schema. If you change it, update both paths.
-- Every pipeline stage must run standalone on a single node, with no scheduler required.
-- Keep demo circuits in `circuits/` as regression tests. A change that breaks a demo circuit isn't done.
+- Never commit API keys. The Gemini key comes from `GEMINI_API_KEY` in `.env`, which is gitignored. `GEMINI_MODEL` and `NGSPICE_PATH` are optional.
+- Every number in the UI comes from `SimResult`. Never display a value that Gemini produced as if it were measured or simulated.
+- Keep example circuits in `circuits/` as regression tests. A change that breaks an example's `expect` isn't done.

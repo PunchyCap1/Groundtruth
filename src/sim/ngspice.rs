@@ -1,8 +1,9 @@
-//! Stage 4: run ngspice in batch mode and read back node voltages and currents.
+//! Run ngspice in batch mode and read back node voltages and branch currents.
 
-use super::types::{Netlist, SimResult};
+use super::{Netlist, SimResult};
 use anyhow::{Context, Result, bail};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Ngspice {
     pub binary: String,
@@ -19,16 +20,19 @@ impl Ngspice {
     }
 
     pub fn run(&self, netlist: &Netlist) -> Result<SimResult> {
+        static RUN: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!("groundtruth-{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
-        let path = dir.join("circuit.cir");
+        let path = dir.join(format!("circuit-{}.cir", RUN.fetch_add(1, Ordering::Relaxed)));
         std::fs::write(&path, &netlist.spice)?;
 
         let out = Command::new(&self.binary)
             .arg("-b")
             .arg(&path)
             .output()
-            .with_context(|| format!("could not run `{}`; is ngspice installed?", self.binary))?;
+            .with_context(|| format!("could not run `{}`; is ngspice installed?", self.binary));
+        let _ = std::fs::remove_file(&path);
+        let out = out?;
         let log = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         if !out.status.success() || log.contains("Error") {
             bail!("ngspice failed:\n{log}");
@@ -46,8 +50,8 @@ pub fn parse(log: &str, netlist: &Netlist) -> Result<SimResult> {
         let name = name.trim().to_lowercase();
 
         if let Some(src) = name.strip_suffix("#branch") {
-            if let Some((part, _)) = netlist.ammeters.iter().find(|(_, am)| am.to_lowercase() == src) {
-                res.part_current.insert(part.clone(), value);
+            if let Some((part, leg)) = netlist.ammeters.get(src) {
+                res.leg_current.insert((part.clone(), *leg), value);
             }
         } else if let Some(net) = netlist.node_to_net.get(&name) {
             res.net_voltage.insert(net.clone(), value);
@@ -57,7 +61,7 @@ pub fn parse(log: &str, netlist: &Netlist) -> Result<SimResult> {
     if let Some(net) = netlist.node_to_net.get("0") {
         res.net_voltage.insert(net.clone(), 0.0);
     }
-    if res.part_current.is_empty() {
+    if res.leg_current.is_empty() {
         bail!("ngspice ran but printed no currents:\n{log}");
     }
     Ok(res)
