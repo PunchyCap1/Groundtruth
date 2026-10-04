@@ -2,7 +2,7 @@
 //! SimResult, so every number shown here comes from ngspice.
 
 use super::{Checks, Finding, Fix, PEAK_WINDOW, Severity, SimResult};
-use crate::circuit::{Circuit, Hole, Kind, Part, fmt_si};
+use crate::circuit::{Circuit, Col, Hole, Kind, Part, fmt_si};
 use std::collections::BTreeMap;
 
 const LED_MIN_A: f64 = 0.5e-3;
@@ -29,6 +29,13 @@ pub fn analyze(circuit: &Circuit, sim: &SimResult) -> Checks {
         fix: None,
     };
 
+    // A shorted battery can't hold its voltage, which is the real reason anything else goes dark.
+    let shorted = circuit
+        .parts
+        .iter()
+        .find(|p| p.kind == Kind::Battery && -sim.current(&p.id).unwrap_or(0.0) > SHORT_A)
+        .map(|p| p.id.clone());
+
     for part in &circuit.parts {
         let i = sim.current(&part.id);
         match part.kind {
@@ -37,7 +44,15 @@ pub fn analyze(circuit: &Circuit, sim: &SimResult) -> Checks {
                 let (anode, cathode) = (part.legs[0], part.legs[1]);
                 let ma = milliamps(i);
                 let peak = sim.recent_peak.get(&(part.id.clone(), 0)).copied().filter(|p| *p >= LED_MIN_A);
-                if let (true, Some(peak)) = (i < LED_MIN_A, peak) {
+                if let (true, Some(b)) = (i < LED_MIN_A, &shorted) {
+                    findings.push(finding(
+                        part,
+                        Severity::Info,
+                        format!("{} is off because {b} is shorted.", part.id),
+                        format!("Fix the short circuit on {b} first; it pulls the battery voltage down to almost nothing."),
+                        vec![],
+                    ));
+                } else if let (true, Some(peak)) = (i < LED_MIN_A, peak) {
                     // Over time, dark now but lit a moment ago: blinking or fading, not broken.
                     findings.push(finding(
                         part,
@@ -47,7 +62,7 @@ pub fn analyze(circuit: &Circuit, sim: &SimResult) -> Checks {
                         vec![],
                     ));
                 } else if i < LED_MIN_A {
-                    findings.push(dark_led(circuit, part, ma, v(&anode), v(&cathode), &nets));
+                    findings.push(dark_led(circuit, part, i, v(&anode), v(&cathode), &nets));
                 } else if i > LED_MAX_A {
                     findings.push(finding(
                         part,
@@ -136,7 +151,8 @@ pub fn analyze(circuit: &Circuit, sim: &SimResult) -> Checks {
     Checks { pass: !findings.iter().any(|f| f.severity == Severity::Fault), findings }
 }
 
-fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BTreeMap<String, Vec<(String, usize)>>) -> Finding {
+fn dark_led(circuit: &Circuit, part: &Part, amps: f64, va: f64, vc: f64, nets: &BTreeMap<String, Vec<(String, usize)>>) -> Finding {
+    let ma = milliamps(amps);
     let id = part.id.as_str();
     let (anode, cathode) = (part.legs[0], part.legs[1]);
     let base = format!("{id} draws {ma:.2} mA");
@@ -177,6 +193,14 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
             .min_by_key(|(_, h)| (h.row as i32 - hole.row as i32).abs())
             .filter(|(_, h)| (h.row as i32 - hole.row as i32).abs() <= 3);
 
+        // Same column if that hole is free, else the first free hole on the same side of that row.
+        let fix_to = |row: u8| {
+            let half: &[Col] = if Col::STRIP[..5].contains(&hole.col) { &Col::STRIP[..5] } else { &Col::STRIP[5..] };
+            std::iter::once(hole.col)
+                .chain(half.iter().copied())
+                .map(|col| Hole { row, col })
+                .find(|t| !hole.col.is_rail() && circuit.occupant(*t).is_none())
+        };
         return match nearest {
             Some((other, h)) => fault(
                 format!("{base} because {} is in row {}, not row {}.", other.id, h.row, hole.row),
@@ -186,7 +210,7 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
                     h.row
                 ),
                 vec![hole, h],
-                Some(Fix { part: id.into(), moves: vec![(leg, Hole { row: h.row, col: hole.col })] }),
+                fix_to(h.row).map(|to| Fix { part: id.into(), moves: vec![(leg, to)] }),
             ),
             None => fault(
                 format!("{base}: its {leg_name} is not connected."),
@@ -198,7 +222,7 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
     }
 
     // An open switch somewhere is the likely, and intended, reason.
-    if let Some(sw) = circuit.parts.iter().find(|p| matches!(p.kind, Kind::Button | Kind::Switch) && !p.pressed) {
+    if let Some(sw) = circuit.parts.iter().find(|p| matches!(p.kind, Kind::Button | Kind::Switch) && !p.pressed && same_circuit(circuit, part, p)) {
         let how = if sw.kind == Kind::Switch { "tap Space to flip it on" } else { "hold Space to press it" };
         return Finding {
             part: id.into(),
@@ -211,7 +235,7 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
     }
 
     // A night-light style circuit is supposed to be off in bright light.
-    if let Some(ldr) = circuit.parts.iter().find(|p| p.kind == Kind::Ldr && p.light > 0.5) {
+    if let Some(ldr) = circuit.parts.iter().find(|p| p.kind == Kind::Ldr && p.light > 0.5 && same_circuit(circuit, part, p)) {
         return Finding {
             part: id.into(),
             severity: Severity::Info,
@@ -220,6 +244,25 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
             highlight: vec![],
             fix: None,
         };
+    }
+
+    // Some current flows (more than leakage), so the loop is complete; it is just starved.
+    if amps > 1e-6 {
+        let battery = circuit.parts.iter().find(|p| p.kind == Kind::Battery).and_then(|b| b.value).unwrap_or(5.0);
+        let detail = if battery < 2.5 {
+            format!(
+                "The circuit is complete, but a {} battery is barely enough to switch an LED on ({:.2} V across it now). Use a higher-voltage battery.",
+                fmt_si(battery, "V"),
+                va - vc
+            )
+        } else {
+            format!(
+                "The circuit is complete, but there is too much resistance in series. For about 10 mA from {}, use around {} in series with {id}.",
+                fmt_si(battery, "V"),
+                fmt_si(((battery - 2.0) / 0.010).round(), "Ω")
+            )
+        };
+        return fault(format!("{base}, too little to light."), detail, vec![anode, cathode], None);
     }
 
     fault(
@@ -251,4 +294,33 @@ fn sustained(time: &[f64], values: &[f64]) -> Option<f64> {
         }
     }
     pts.last().map(|p| p.0)
+}
+
+/// True if `b` is wired into the same circuit as `a`, joining nets through every part
+/// except batteries. Stops an unrelated switch or LDR elsewhere on the board from
+/// being blamed for (and hiding) a real fault.
+fn same_circuit(circuit: &Circuit, a: &Part, b: &Part) -> bool {
+    fn find(parent: &mut BTreeMap<String, String>, k: &str) -> String {
+        let next = parent.get(k).cloned().unwrap_or_else(|| k.to_string());
+        if next == k {
+            return next;
+        }
+        let root = find(parent, &next);
+        parent.insert(k.to_string(), root.clone());
+        root
+    }
+    let mut parent = BTreeMap::new();
+    for p in circuit.parts.iter().filter(|p| p.kind != Kind::Battery) {
+        let Some(first) = p.legs.first() else { continue };
+        for h in &p.legs[1..] {
+            let (x, y) = (find(&mut parent, &first.net_key()), find(&mut parent, &h.net_key()));
+            if x != y {
+                parent.insert(x, y);
+            }
+        }
+    }
+    match (a.legs.first(), b.legs.first()) {
+        (Some(x), Some(y)) => find(&mut parent, &x.net_key()) == find(&mut parent, &y.net_key()),
+        _ => false,
+    }
 }

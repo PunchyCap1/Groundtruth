@@ -58,6 +58,20 @@ pub struct TranState {
     pub cap_v: BTreeMap<String, f64>,
     /// (part id, leg) -> (largest current seen recently, when).
     pub peak: BTreeMap<(String, usize), (f64, f64)>,
+    /// Fingerprint of the wiring the peaks belong to; see [`layout_key`].
+    pub layout: u64,
+}
+
+/// Fingerprint of everything except the controls a user plays with while it runs
+/// (button presses, switch, pot wiper, LDR light). When it changes, old peaks no longer
+/// describe this circuit, so an LED that was just unplugged reads as a fault right away.
+fn layout_key(circuit: &Circuit) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for p in &circuit.parts {
+        format!("{}|{:?}|{:?}|{:?}|{:?}", p.id, p.kind, p.legs, p.value, p.color).hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Circuits with something that stores energy are simulated over time instead of at a DC operating point.
@@ -157,7 +171,9 @@ pub fn run_tran(circuit: &Circuit, ng: &ngspice::Ngspice, state: &TranState, dt:
     };
 
     let end = state.t + dt;
-    let mut next = TranState { t: end, net_v: sim.net_voltage.clone(), cap_v: BTreeMap::new(), peak: state.peak.clone() };
+    let layout = layout_key(circuit);
+    let peak = if state.layout == layout { state.peak.clone() } else { BTreeMap::new() };
+    let mut next = TranState { t: end, net_v: sim.net_voltage.clone(), cap_v: BTreeMap::new(), peak, layout };
     for p in circuit.parts.iter().filter(|p| p.kind == Kind::Capacitor) {
         if let (Some(a), Some(b)) = (sim.voltage(&p.legs[0]), sim.voltage(&p.legs[1])) {
             next.cap_v.insert(p.id.clone(), a - b);
