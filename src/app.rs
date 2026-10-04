@@ -407,7 +407,8 @@ impl App {
                         None => self.say(ui.ctx(), "The board is full."),
                     }
                 }
-                resp.on_hover_text(kind.blurb());
+                let key = i + 1;
+                resp.on_hover_ui(|ui| part_tooltip(ui, *kind, key));
                 if i % 2 == 1 {
                     ui.end_row();
                 }
@@ -568,14 +569,27 @@ impl App {
     fn checks_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             theme::section(ui, "CHECKS");
-            let (color, word) = match (&self.out.error, &self.out.checks) {
-                _ if self.circuit.parts.is_empty() => (theme::DIM, "EMPTY BOARD"),
-                (Some(_), _) => (theme::AMBER, "NOT SIMULATED"),
-                (None, Some(c)) if c.pass => (theme::GREEN, "PASS"),
-                (None, Some(_)) => (theme::RED, "FAULT"),
-                _ => (theme::DIM, "…"),
+            match (&self.out.error, &self.out.checks) {
+                _ if self.circuit.parts.is_empty() => theme::badge_outline(ui, "EMPTY BOARD", theme::DIM),
+                (Some(_), _) => theme::badge_outline(ui, "NOT SIMULATED", theme::DIM),
+                (None, Some(c)) if c.pass => theme::badge(ui, "✔ PASS", theme::GREEN),
+                (None, Some(_)) => theme::badge(ui, "✖ FAULT", theme::RED),
+                _ => theme::badge_outline(ui, "…", theme::DIM),
             };
-            ui.label(RichText::new(word).font(FontId::monospace(13.0)).color(color).strong());
+            if let (None, Some(c)) = (&self.out.error, &self.out.checks) {
+                let count = |sev| c.findings.iter().filter(|f| f.severity == sev).count();
+                let (faults, warns) = (count(Severity::Fault), count(Severity::Warning));
+                let mut tally = Vec::new();
+                if faults > 0 {
+                    tally.push(RichText::new(format!("{faults} fault{}", if faults == 1 { "" } else { "s" })).color(theme::RED));
+                }
+                if warns > 0 {
+                    tally.push(RichText::new(format!("{warns} warning{}", if warns == 1 { "" } else { "s" })).color(theme::AMBER));
+                }
+                for t in tally {
+                    ui.label(t.font(FontId::monospace(11.0)).strong());
+                }
+            }
             ui.label(RichText::new("from ngspice + rule checks").font(FontId::monospace(10.5)).color(theme::DIM));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.checkbox(&mut self.show_readouts, "readouts");
@@ -591,29 +605,47 @@ impl App {
             }
             let mut apply = None;
             if let Some(checks) = &self.out.checks {
-                for f in &checks.findings {
+                // Worst first, so a fault is never buried under OK lines.
+                let mut findings: Vec<_> = checks.findings.iter().collect();
+                findings.sort_by_key(|f| f.severity);
+                for f in findings {
                     let (color, tag) = match f.severity {
-                        Severity::Fault => (theme::RED, "FAULT"),
-                        Severity::Warning => (theme::AMBER, "WARN"),
-                        Severity::Info => (theme::CYAN, "INFO"),
-                        Severity::Ok => (theme::GREEN, "OK"),
+                        Severity::Fault => (theme::RED, "✖ FAULT"),
+                        Severity::Warning => (theme::AMBER, "⚠ WARN "),
+                        Severity::Info => (theme::CYAN, "ℹ INFO "),
+                        Severity::Ok => (theme::GREEN, "✔ OK   "),
                     };
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{tag:<5}")).font(FontId::monospace(11.0)).color(color));
-                        let r = ui.add(egui::Label::new(RichText::new(&f.headline).size(13.5)).sense(Sense::click()));
-                        if r.clicked() {
-                            self.editor.selected = Some(f.part.clone());
-                        }
-                        r.on_hover_text(&f.detail);
-                        if let Some(fix) = &f.fix {
-                            if ui.small_button(RichText::new("Apply fix").color(theme::GREEN)).clicked() {
-                                apply = Some(fix.clone());
+                    let quiet = matches!(f.severity, Severity::Info | Severity::Ok);
+                    let fill = if quiet { Color32::TRANSPARENT } else { color.gamma_multiply(0.12) };
+                    let stroke = if quiet { Color32::TRANSPARENT } else { color.gamma_multiply(0.6) };
+                    egui::Frame::new()
+                        .fill(fill)
+                        .stroke(Stroke::new(1.0, stroke))
+                        .corner_radius(4)
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                if quiet {
+                                    ui.label(RichText::new(tag).font(FontId::monospace(11.0)).color(color));
+                                } else {
+                                    theme::badge(ui, tag.trim_end(), color);
+                                }
+                                let r = ui.add(egui::Label::new(RichText::new(&f.headline).size(13.5)).sense(Sense::click()));
+                                if r.clicked() {
+                                    self.editor.selected = Some(f.part.clone());
+                                }
+                                r.on_hover_text(&f.detail);
+                                if let Some(fix) = &f.fix {
+                                    if ui.small_button(RichText::new("Apply fix").color(theme::GREEN)).clicked() {
+                                        apply = Some(fix.clone());
+                                    }
+                                }
+                            });
+                            if f.severity != Severity::Ok {
+                                ui.label(RichText::new(&f.detail).color(theme::DIM).size(12.0));
                             }
-                        }
-                    });
-                    if f.severity != Severity::Ok {
-                        ui.label(RichText::new(&f.detail).color(theme::DIM).size(12.0));
-                    }
+                        });
                 }
             }
             if let Some(fix) = apply {
@@ -908,4 +940,21 @@ fn code_block(ui: &mut egui::Ui, text: &str) {
         ui.set_width(ui.available_width());
         ui.add(egui::Label::new(RichText::new(text).font(FontId::monospace(11.0))).wrap());
     });
+}
+
+/// Parts-bin hover card: what the part is, its legs (polarity), default value and shortcut.
+fn part_tooltip(ui: &mut egui::Ui, kind: Kind, key: usize) {
+    ui.set_max_width(260.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(kind.name()).strong().color(theme::AMBER));
+        ui.label(RichText::new(format!("{}1, {}2…", kind.id_prefix(), kind.id_prefix())).font(FontId::monospace(10.5)).color(theme::DIM));
+    });
+    ui.label(kind.blurb());
+    ui.add_space(2.0);
+    let legs = kind.leg_names().join(" · ");
+    ui.label(RichText::new(format!("Legs  {legs}")).font(FontId::monospace(11.0)).color(theme::DIM));
+    if let (Some(v), Some(unit)) = (kind.default_value(), kind.unit()) {
+        ui.label(RichText::new(format!("Default  {}", fmt_si(v, unit))).font(FontId::monospace(11.0)).color(theme::DIM));
+    }
+    ui.label(RichText::new(format!("Drag onto the board, click, or press {key}")).size(11.5).color(theme::DIM));
 }
