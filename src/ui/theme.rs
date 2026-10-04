@@ -112,3 +112,7 @@ pub fn badge_outline(ui: &mut egui::Ui, text: &str, color: Color32) -> egui::Res
         .show(ui, |ui| ui.label(egui::RichText::new(text).font(FontId::monospace(11.5)).color(color).strong()))
         .response
 }
+
+/// Frame interval for pulsing highlights (faults, flagged parts). 30 fps looks the same
+/// as 60 for a slow pulse and halves the CPU the app burns while a fault is on screen.
+pub const PULSE_FRAME: std::time::Duration = std::time::Duration::from_millis(33);

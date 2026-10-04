@@ -298,7 +298,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
             let s = layout(&g, part);
             let r = Rect::from_points(&[s.legs.clone(), vec![s.body]].concat()).expand(p * 0.7);
             painter.rect_stroke(r, 0, Stroke::new(1.0, theme::HI.gamma_multiply(0.4 + 0.6 * pulse)), StrokeKind::Outside);
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(theme::PULSE_FRAME);
         }
     }
 
@@ -326,7 +326,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
             }
         }
         if checks.findings.iter().any(|f| f.severity == Severity::Fault) {
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(theme::PULSE_FRAME);
         }
     }
 

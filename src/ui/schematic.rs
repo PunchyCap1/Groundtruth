@@ -210,7 +210,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &Circuit, sim: Option<&SimResult>, selec
             resp.on_hover_text_at_pointer(p.describe());
         }
         if !flagged.is_empty() {
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(theme::PULSE_FRAME);
         }
     });
 }
