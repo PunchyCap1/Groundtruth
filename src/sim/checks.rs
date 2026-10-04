@@ -94,7 +94,13 @@ pub fn analyze(circuit: &Circuit, sim: &SimResult) -> Checks {
                 }
             }
             Kind::Npn => {
-                if let Some(ib) = sim.leg_current.get(&(part.id.clone(), 1)).copied() {
+                let key = (part.id.clone(), 1);
+                // Over a transient run, judge the sustained current; switching spikes are normal.
+                let ib = match sim.trace.as_ref().and_then(|t| t.leg_current.get(&key).map(|v| (&t.time, v))) {
+                    Some((time, series)) => sustained(time, series),
+                    None => sim.leg_current.get(&key).copied(),
+                };
+                if let Some(ib) = ib {
                     if ib > BASE_MAX_A {
                         findings.push(finding(
                             part,
@@ -222,4 +228,27 @@ fn dark_led(circuit: &Circuit, part: &Part, ma: f64, va: f64, vc: f64, nets: &BT
         vec![anode, cathode],
         None,
     )
+}
+
+/// The level a signal sits at or below for 80% of the run (time-weighted), so brief
+/// spikes, like a transistor base during a switching edge, don't count.
+fn sustained(time: &[f64], values: &[f64]) -> Option<f64> {
+    let n = time.len().min(values.len());
+    if n < 2 {
+        return values.last().copied();
+    }
+    let mut pts: Vec<(f64, f64)> = (0..n - 1).map(|k| (values[k], (time[k + 1] - time[k]).max(0.0))).collect();
+    let total: f64 = pts.iter().map(|p| p.1).sum();
+    if total <= 0.0 {
+        return values.last().copied();
+    }
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut acc = 0.0;
+    for (v, dt) in &pts {
+        acc += dt;
+        if acc >= 0.8 * total {
+            return Some(*v);
+        }
+    }
+    pts.last().map(|p| p.0)
 }

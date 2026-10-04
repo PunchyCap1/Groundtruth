@@ -189,7 +189,7 @@ mod tests {
     /// Every example builds a netlist; if ngspice is installed, it also reaches the expected result.
     #[test]
     fn example_circuits() {
-        let ng = ngspice::Ngspice { binary: std::env::var("NGSPICE_PATH").unwrap_or("ngspice".into()) };
+        let ng = ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
         let have_ngspice = ng.probe().is_some();
         if !have_ngspice {
             eprintln!("ngspice not found; checking netlists only");
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn pressing_the_button_lights_the_led() {
-        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        let ng = ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
         if ng.probe().is_none() {
             return;
         }
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn transient_chunks_follow_the_rc_curve() {
-        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        let ng = ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
         if ng.probe().is_none() {
             return;
         }
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn blinker_blinks_without_faults() {
-        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        let ng = ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
         if ng.probe().is_none() {
             return;
         }
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn fading_led_fades_after_the_button() {
-        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        let ng = ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
         if ng.probe().is_none() {
             return;
         }
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn night_light_follows_the_ldr_and_switch() {
-        let ng = ngspice::Ngspice { binary: "ngspice".into() };
+        let ng = ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
         if ng.probe().is_none() {
             return;
         }
