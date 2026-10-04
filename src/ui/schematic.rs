@@ -3,7 +3,7 @@
 //! part hangs in its own column between the nets its legs touch. That makes a
 //! reversed LED visibly point uphill.
 
-use super::board::{RAIL_BLUE, RAIL_RED, brightness, led_colors, lerp};
+use super::board::{MINUS, PLUS, brightness, led_colors, lerp};
 use super::theme;
 use crate::circuit::{Circuit, Kind, Part, fmt_si};
 use crate::sim::SimResult;
@@ -50,7 +50,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &Circuit, sim: Option<&SimResult>, selec
 
     if parts.is_empty() {
         let (r, painter) = ui.allocate_painter(ui.available_size(), Sense::hover());
-        painter.text(r.rect.center(), Align2::CENTER_CENTER, "The schematic draws itself as you build on the breadboard.", FontId::monospace(13.0), theme::DIM);
+        painter.text(r.rect.center(), Align2::CENTER_CENTER, "the schematic draws itself as you build on the breadboard", FontId::monospace(12.0), theme::DIM);
         return;
     }
 
@@ -109,17 +109,17 @@ pub fn show(ui: &mut egui::Ui, circuit: &Circuit, sim: Option<&SimResult>, selec
         for (node, xs) in &attach {
             let y = y_of(node);
             let (x0, x1) = xs.iter().fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
-            let wire = Stroke::new(1.6, theme::TEXT.gamma_multiply(0.8));
+            let wire = Stroke::new(1.0, theme::DIM);
             painter.line_segment([pos2(x0 - 18.0, y), pos2(x1, y)], wire);
             if xs.len() >= 3 {
                 for x in xs {
-                    painter.circle_filled(pos2(*x, y), 3.5, theme::TEXT);
+                    painter.circle_filled(pos2(*x, y), 2.5, theme::TEXT);
                 }
             }
             let is_ground = Some(node) == ground.as_ref();
             let v = sim.and_then(|_| node_v.get(node)).map(|v| format!("{v:.2} V")).unwrap_or_default();
             let label = if is_ground { format!("GND {v}") } else { v };
-            painter.text(pos2(x0 - 24.0, y), Align2::RIGHT_CENTER, label, FontId::monospace(11.0), if is_ground { theme::DIM } else { theme::CYAN });
+            painter.text(pos2(x0 - 24.0, y), Align2::RIGHT_CENTER, label, FontId::monospace(11.0), if is_ground { theme::DIM } else { theme::ACCENT });
             if is_ground {
                 let g = pos2(x0 - 18.0, y);
                 painter.line_segment([g, g + vec2(0.0, 10.0)], wire);
@@ -133,8 +133,8 @@ pub fn show(ui: &mut egui::Ui, circuit: &Circuit, sim: Option<&SimResult>, selec
         for pl in &placed {
             let part = pl.part;
             let is_sel = selected.as_deref() == Some(part.id.as_str());
-            let ink = if is_sel { theme::AMBER } else { theme::TEXT };
-            let stroke = Stroke::new(if is_sel { 2.4 } else { 1.8 }, ink);
+            let ink = if is_sel { theme::HI } else { theme::TEXT };
+            let stroke = Stroke::new(if is_sel { 1.6 } else { 1.0 }, ink);
             let current = sim.and_then(|s| s.current(&part.id));
             let (y0, y1) = (y_of(&pl.nodes[0]), y_of(pl.nodes.last().unwrap()));
             let shorted = pl.nodes.iter().all(|n| n == &pl.nodes[0]);
@@ -192,14 +192,14 @@ pub fn show(ui: &mut egui::Ui, circuit: &Circuit, sim: Option<&SimResult>, selec
             painter.text(label_at, Align2::LEFT_BOTTOM, lines.join(" "), FontId::monospace(11.0), ink);
             if let Some(i) = current {
                 let i = if part.kind == Kind::Battery { -i } else { i };
-                painter.text(label_at + vec2(0.0, 4.0), Align2::LEFT_TOP, format!("{:.2} mA", milliamps(i)), FontId::monospace(11.0), theme::CYAN);
+                painter.text(label_at + vec2(0.0, 4.0), Align2::LEFT_TOP, format!("{:.2} mA", milliamps(i)), FontId::monospace(11.0), theme::ACCENT);
             }
             if flagged.contains(&part.id) {
-                painter.rect_stroke(bounds.expand(6.0), 6, Stroke::new(2.0, theme::AMBER), StrokeKind::Outside);
+                painter.rect_stroke(bounds.expand(6.0), 0, Stroke::new(1.0, theme::HI), StrokeKind::Outside);
             }
             if pointer.is_some_and(|m| bounds.contains(m)) {
                 hovered = Some(part);
-                painter.rect_filled(bounds.expand(4.0), 6, theme::AMBER.gamma_multiply(0.06));
+                painter.rect_stroke(bounds.expand(4.0), 0, Stroke::new(1.0, theme::EDGE), StrokeKind::Outside);
             }
         }
 
@@ -274,9 +274,9 @@ fn symbol(painter: &Painter, part: &Part, c: Pos2, u: Vec2, len: f32, stroke: St
             painter.line_segment([b, c + u * len * 0.08], stroke);
             let long = c - u * len * 0.08;
             let short = c + u * len * 0.08;
-            painter.line_segment([long - n * len * 0.38, long + n * len * 0.38], Stroke::new(stroke.width, RAIL_RED));
-            painter.line_segment([short - n * len * 0.2, short + n * len * 0.2], Stroke::new(stroke.width * 2.2, RAIL_BLUE));
-            painter.text(long + n * len * 0.5 - u * len * 0.12, Align2::CENTER_CENTER, "+", FontId::monospace(12.0), RAIL_RED);
+            painter.line_segment([long - n * len * 0.38, long + n * len * 0.38], Stroke::new(stroke.width, PLUS));
+            painter.line_segment([short - n * len * 0.2, short + n * len * 0.2], Stroke::new(stroke.width * 2.2, MINUS));
+            painter.text(long + n * len * 0.5 - u * len * 0.12, Align2::CENTER_CENTER, "+", FontId::monospace(12.0), PLUS);
         }
         Kind::Capacitor => {
             let gap = len * 0.08;

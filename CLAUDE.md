@@ -28,10 +28,10 @@ Don't start tier 2 or 3 work while tier 1 is broken. When unsure, ask which tier
 ## Demo script (keep this working)
 
 1. Open Examples → "LED, wrong row". The board outline is red, CHECKS shows the fault, and a green ghost shows the fix.
-2. Click "Why isn't it working?" Gemini explains the row gap and highlights R1/LED1.
-3. Click "Apply fix". The LED lights and the board turns green.
+2. Click "why isn't it working?" Gemini explains the row gap and highlights R1/LED1.
+3. Click "apply fix". The LED lights and the board turns green.
 4. Start from New: drag a battery, resistor, LED and wires. Readouts update live.
-5. Open "Transistor switch", select SW1, hold Space. The LED lights. Switch to SCHEMATIC.
+5. Open "Transistor switch", select SW1, hold Space. The LED lights. Switch to schematic.
 
 ## Repo layout
 
