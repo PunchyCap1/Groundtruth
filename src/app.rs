@@ -442,10 +442,10 @@ impl App {
         ui.add(egui::TextEdit::singleline(&mut self.circuit.name).desired_width(f32::INFINITY));
         ui.add(egui::TextEdit::multiline(&mut self.circuit.description).hint_text("Notes about this circuit…").desired_rows(2).desired_width(f32::INFINITY));
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Board").color(theme::DIM));
+            ui.label(RichText::new("Board rows").color(theme::DIM));
             for rows in [30u8, 45, 60] {
                 let fits = self.circuit.parts.iter().all(|p| p.legs.iter().all(|h| h.row <= rows));
-                if ui.add_enabled(fits, egui::RadioButton::new(self.circuit.rows == rows, format!("{rows} rows"))).clicked() {
+                if ui.add_enabled(fits, egui::RadioButton::new(self.circuit.rows == rows, rows.to_string())).clicked() {
                     self.circuit.rows = rows;
                 }
             }
@@ -518,7 +518,7 @@ impl App {
             Kind::Button => {
                 ui.checkbox(&mut part.pressed, "Latched pressed");
                 let down = held.as_deref() == Some(part.id.as_str());
-                ui.label(RichText::new(if down { "● held (Space)" } else { "Hold Space to press it momentarily." }).color(if down { theme::AMBER } else { theme::DIM }).size(12.0));
+                ui.label(RichText::new(if down { "HELD (Space)" } else { "Hold Space to press it momentarily." }).color(if down { theme::AMBER } else { theme::DIM }).size(12.0));
             }
             Kind::Pot => {
                 ui.horizontal(|ui| {
@@ -543,7 +543,7 @@ impl App {
             }
         });
         if let Some(i) = sim.as_ref().and_then(|s| s.current(&part.id)) {
-            let i = if part.kind == Kind::Battery { -i } else { i };
+            let i = board::shown_current(part.kind, i);
             let what = match part.kind {
                 Kind::Npn => "collector current",
                 Kind::Battery => "supplying",
