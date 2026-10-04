@@ -380,12 +380,24 @@ impl Circuit {
         for col in cols {
             for row in 1..=self.rows {
                 let probe = kind.default_legs(Hole { row, col: *col });
-                if self.fits(&probe, None) {
+                if self.fits(&probe, None) && !self.under_a_part(&probe) {
                     return self.add(kind, Hole { row, col: *col });
                 }
             }
         }
         None
+    }
+
+    /// True if `legs` (all in one column) would sit under the body of a part that
+    /// already runs down that column, like an LED dropped between a resistor's legs.
+    fn under_a_part(&self, legs: &[Hole]) -> bool {
+        let span = |legs: &[Hole]| {
+            let col = legs.first()?.col;
+            let rows = legs.iter().map(|h| h.row);
+            legs.iter().all(|h| h.col == col).then(|| (col, rows.clone().min().unwrap(), rows.max().unwrap()))
+        };
+        let Some((col, lo, hi)) = span(legs) else { return false };
+        self.parts.iter().filter_map(|p| span(&p.legs)).any(|(c, a, b)| c == col && a <= hi && lo <= b)
     }
 
     pub fn remove(&mut self, id: &str) {
@@ -490,5 +502,15 @@ mod tests {
         assert_eq!(c.add(Kind::Resistor, at).as_deref(), Some("R1"));
         assert_eq!(c.add(Kind::Led, at), None);
         assert_eq!(c.add(Kind::Led, Hole { row: 5, col: Col::D }).as_deref(), Some("LED1"));
+    }
+
+    #[test]
+    fn add_anywhere_skips_part_bodies() {
+        let mut c = Circuit::default();
+        let r = c.add_anywhere(Kind::Resistor).unwrap();
+        let led = c.add_anywhere(Kind::Led).unwrap();
+        let (r, led) = (c.part(&r).unwrap(), c.part(&led).unwrap());
+        let r_rows = r.legs[0].row..=r.legs[1].row;
+        assert!(led.legs.iter().all(|h| h.col != r.legs[0].col || !r_rows.contains(&h.row)), "LED placed under R1: {:?}", led.legs);
     }
 }
