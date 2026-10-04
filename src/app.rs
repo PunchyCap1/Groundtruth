@@ -463,7 +463,7 @@ impl App {
             ui.label(RichText::new(part.kind.name()).size(14.0));
         });
         ui.label(RichText::new(part.kind.blurb()).color(theme::DIM).size(12.0));
-        ui.add_space(4.0);
+        ui.add_space(8.0);
 
         let presets: &[f64] = match part.kind {
             Kind::Battery => &[1.5, 3.0, 3.3, 5.0, 9.0, 12.0],
@@ -478,7 +478,7 @@ impl App {
                 self.value_text = (part.id.clone(), fmt_si(v, unit));
             }
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Value").color(theme::DIM));
+                ui.label(RichText::new("Value").color(theme::DIM).size(12.0));
                 let r = ui.add(egui::TextEdit::singleline(&mut self.value_text.1).desired_width(90.0).font(FontId::monospace(13.0)));
                 if r.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter)) && r.has_focus() {
                     match parse_si(&self.value_text.1).filter(|x| *x > 0.0) {
@@ -501,7 +501,7 @@ impl App {
             Kind::Led | Kind::Wire => {
                 let colors: &[&str] = if part.kind == Kind::Led { &LED_COLORS } else { &WIRE_COLORS };
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Color").color(theme::DIM));
+                    ui.label(RichText::new("Color").color(theme::DIM).size(12.0));
                     for c in colors {
                         let swatch = if part.kind == Kind::Led { board::led_colors(Some(c)).1 } else { board::wire_color(Some(c)) };
                         let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
@@ -522,7 +522,7 @@ impl App {
             }
             Kind::Pot => {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Wiper").color(theme::DIM));
+                    ui.label(RichText::new("Wiper").color(theme::DIM).size(12.0));
                     ui.add(egui::Slider::new(&mut part.wiper, 0.0..=1.0).show_value(false));
                     ui.label(RichText::new(format!("{:.0}%", part.wiper * 100.0)).monospace());
                 });
@@ -530,29 +530,37 @@ impl App {
             _ => {}
         }
 
-        ui.add_space(4.0);
-        egui::Grid::new("legs").num_columns(3).spacing(vec2(10.0, 3.0)).show(ui, |ui| {
+        ui.add_space(8.0);
+        let dim = |t: &str| RichText::new(t).color(theme::DIM).size(12.0);
+        let reading = |t: String| RichText::new(t).monospace().color(theme::CYAN);
+        egui::Grid::new("legs").num_columns(3).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            ui.label(RichText::new("LEG").font(FontId::monospace(10.0)).color(theme::DIM));
+            ui.label(RichText::new("HOLE").font(FontId::monospace(10.0)).color(theme::DIM));
+            ui.label(RichText::new("NGSPICE").font(FontId::monospace(10.0)).color(theme::DIM));
+            ui.end_row();
             for (leg, h) in part.legs.iter().enumerate() {
-                ui.label(RichText::new(part.kind.leg_names()[leg]).color(theme::DIM).size(12.0));
+                ui.label(dim(part.kind.leg_names()[leg]));
                 ui.label(RichText::new(h.short()).monospace());
                 match sim.as_ref().and_then(|s| s.voltage(h)) {
-                    Some(v) => ui.label(RichText::new(format!("{v:.2} V")).monospace().color(theme::CYAN)),
-                    None => ui.label(""),
+                    Some(v) => ui.label(reading(format!("{v:.2} V"))),
+                    None => ui.label(dim("—")),
                 };
                 ui.end_row();
             }
+            if let Some(i) = sim.as_ref().and_then(|s| s.current(&part.id)) {
+                let what = match part.kind {
+                    Kind::Npn => "collector",
+                    Kind::Battery => "supplying",
+                    _ => "current",
+                };
+                ui.label(dim(what));
+                ui.label("");
+                ui.label(reading(format!("{:.2} mA", milliamps(board::shown_current(part.kind, i)))));
+                ui.end_row();
+            }
         });
-        if let Some(i) = sim.as_ref().and_then(|s| s.current(&part.id)) {
-            let i = board::shown_current(part.kind, i);
-            let what = match part.kind {
-                Kind::Npn => "collector current",
-                Kind::Battery => "supplying",
-                _ => "current",
-            };
-            ui.label(RichText::new(format!("{what}: {:.3} mA", milliamps(i))).monospace().color(theme::CYAN));
-        }
 
-        ui.add_space(4.0);
+        ui.add_space(8.0);
         let mut delete = false;
         ui.horizontal(|ui| {
             if ui.button("⟲ Flip  (R)").on_hover_text("Reverse the legs, e.g. to turn an LED around").clicked() {
@@ -618,6 +626,7 @@ impl App {
                     let quiet = matches!(f.severity, Severity::Info | Severity::Ok);
                     let fill = if quiet { Color32::TRANSPARENT } else { color.gamma_multiply(0.12) };
                     let stroke = if quiet { Color32::TRANSPARENT } else { color.gamma_multiply(0.6) };
+                    ui.add_space(2.0);
                     egui::Frame::new()
                         .fill(fill)
                         .stroke(Stroke::new(1.0, stroke))
@@ -697,6 +706,7 @@ impl App {
                 ("Why isn't it working?", "Why isn't my circuit doing what I expect? Walk me through it."),
                 ("Explain it", "Explain how this circuit works, step by step, following the current."),
                 ("Ideas to try", "Suggest a few experiments or next circuits I could build from here."),
+                ("Build one for me", "Propose a small working circuit I could build next, using the parts in the bin, and fill in `circuit` so it loads onto the board."),
             ] {
                 if ui.add_enabled(!busy, egui::Button::new(RichText::new(label).size(12.5))).clicked() {
                     ask = Some(q.to_string());
@@ -708,6 +718,7 @@ impl App {
         // Input pinned to the bottom, conversation above it.
         let input_h = 74.0;
         let log_h = (ui.available_height() - input_h).max(80.0);
+        let mut load_proposal = None;
         egui::ScrollArea::vertical().max_height(log_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
             if self.chat.is_empty() {
                 ui.add_space(8.0);
@@ -730,6 +741,7 @@ impl App {
                         ui.colored_label(theme::RED, e);
                     }
                     Entry::Reply(r) => {
+                        ui.label(RichText::new("GEMINI · AI, not simulated").font(FontId::monospace(10.0)).color(theme::DIM));
                         ui.label(&r.message);
                         for issue in &r.issues {
                             if issue_card(ui, issue, &mut self.editor.selected) {
@@ -741,6 +753,21 @@ impl App {
                                 ui.set_width(ui.available_width());
                                 ui.label(RichText::new(format!("💡 {}", idea.title)).color(theme::CYAN).strong());
                                 ui.label(RichText::new(&idea.description).size(12.5));
+                            });
+                        }
+                        if let Some(c) = &r.circuit {
+                            theme::card(theme::BG, theme::AMBER.gamma_multiply(0.6)).show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(RichText::new("PROPOSED CIRCUIT").font(FontId::monospace(10.5)).color(theme::AMBER));
+                                ui.label(RichText::new(&c.name).strong());
+                                if !c.description.is_empty() {
+                                    ui.label(RichText::new(&c.description).size(12.5));
+                                }
+                                let ids: Vec<&str> = c.parts.iter().map(|p| p.id.as_str()).collect();
+                                ui.label(RichText::new(ids.join(", ")).font(FontId::monospace(10.5)).color(theme::DIM));
+                                if ui.add_enabled(!busy, egui::Button::new(RichText::new("Load onto board").color(theme::GREEN))).on_hover_text("Replaces the board (Ctrl+Z undoes it). ngspice simulates it like any other circuit.").clicked() {
+                                    load_proposal = Some(c.clone());
+                                }
                             });
                         }
                     }
@@ -773,6 +800,15 @@ impl App {
         });
         if let Some(q) = ask {
             self.ask(ui.ctx(), q);
+        }
+        if let Some(c) = load_proposal {
+            match assistant::check_proposal(&c) {
+                Ok(c) => {
+                    self.pending = Some(Cmd::Load(c));
+                    self.say(ui.ctx(), "Loaded Gemini's circuit. Ctrl+Z to undo.");
+                }
+                Err(e) => self.chat.push(Entry::Error(format!("Couldn't load that circuit: {e}"))),
+            }
         }
         hovered_parts
     }
@@ -902,7 +938,7 @@ fn issue_card(ui: &mut egui::Ui, issue: &Issue, selected: &mut Option<String>) -
         });
         ui.label(RichText::new(&issue.explanation).size(12.5));
         if !issue.suggestion.is_empty() {
-            ui.label(RichText::new(format!("→ {}", issue.suggestion)).size(12.5).color(theme::GREEN));
+            ui.label(RichText::new(format!("Fix: {}", issue.suggestion)).size(12.5).color(theme::GREEN));
         }
         if !issue.parts.is_empty() {
             ui.label(RichText::new(format!("parts: {}  ·  click to select", issue.parts.join(", "))).font(FontId::monospace(10.5)).color(theme::DIM));

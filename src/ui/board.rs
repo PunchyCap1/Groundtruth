@@ -371,8 +371,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
             if let Some(part) = on_part {
                 let mut text = part.describe();
                 if let Some(i) = view.sim.and_then(|s| s.current(&part.id)) {
-                    let i = if part.kind == Kind::Battery { -i } else { i };
-                    text.push_str(&format!("\n{:.2} mA", milliamps(i)));
+                    text.push_str(&format!("\n{:.2} mA", milliamps(shown_current(part.kind, i))));
                 }
                 for (leg, h) in part.legs.iter().enumerate() {
                     let v = view.sim.and_then(|s| s.voltage(h)).map(|v| format!("  {v:.2} V")).unwrap_or_default();
@@ -382,7 +381,7 @@ pub fn show(ui: &mut egui::Ui, circuit: &mut Circuit, ed: &mut Editor, view: &Vi
             } else if let Some(h) = hovered_hole {
                 let mut text = format!("{}  ·  net {}", h.label(), h.net_key());
                 if let Some(v) = view.sim.and_then(|s| s.voltage(&h)) {
-                    text.push_str(&format!("\n{v:.3} V"));
+                    text.push_str(&format!("\n{v:.2} V"));
                 }
                 text.push_str("\ndrag from here to draw a wire");
                 resp.clone().on_hover_text_at_pointer(text);
