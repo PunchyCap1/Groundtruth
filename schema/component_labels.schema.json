@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ComponentLabels",
+  "description": "Output of the component-ID stage. Shared by the online (Gemini) and offline (YOLO) paths. Labels only: no geometry, no verdicts.",
+  "type": "object",
+  "properties": {
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Part id assigned by grid mapping, e.g. R1, LED1. Must match a grid-map part."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["resistor", "led", "wire", "supply", "capacitor", "button", "ic", "unknown"]
+          },
+          "value": {
+            "type": ["number", "null"],
+            "description": "Value in SI base units: ohms for resistors, volts for supplies, farads for capacitors. Null if not applicable or unreadable."
+          },
+          "markings": {
+            "type": ["string", "null"],
+            "description": "Raw visible markings: color bands, chip text, LED color."
+          },
+          "positive_leg": {
+            "type": ["integer", "null"],
+            "description": "Index into the part's legs of the positive terminal: LED anode, supply +, electrolytic cap +. Null for non-polar parts."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "0.0 to 1.0"
+          }
+        },
+        "required": ["id", "kind", "value", "markings", "positive_leg", "confidence"]
+      }
+    }
+  },
+  "required": ["components"]
+}
