@@ -11,3 +11,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 ureq = { version = "3", features = ["json"] }
 rfd = "0.17.2"
+
+# macOS app bundle: `cargo install cargo-bundle`, then `cargo bundle --release`
+[package.metadata.bundle]
+name = "Ground Truth"
+identifier = "dev.groundtruth.app"
+icon = ["assets/icon_128.png", "assets/icon_256.png", "assets/icon_512.png"]
+category = "Education"
+short_description = "Breadboard playground with live ngspice simulation"
