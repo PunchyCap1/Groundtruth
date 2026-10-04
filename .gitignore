@@ -3,3 +3,4 @@
 # secrets - never commit your Gemini key
 .env
 
+lab_partner_report*.md
