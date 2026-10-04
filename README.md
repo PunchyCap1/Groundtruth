@@ -6,8 +6,6 @@ The simulator supplies the numbers; Gemini supplies the teaching. Every voltage 
 
 ![A wrong-row LED circuit flagged as a fault, with the fix shown as a ghost](docs/screenshots/02-fault-wrong-row.png)
 
-**Demo video:** [docs/demo.mp4](docs/demo.mp4) (under 2 minutes: find a fault, fix it, build an LED circuit from scratch, switch a transistor, see the schematic).
-
 ## What it does
 
 **Spot the mistake.** The rule checker reads the simulated numbers and flags faults on the board. Here, the resistor ends in row 14 but the LED's anode sits in row 15, so no current flows. A ghost marks where the leg should go, and **apply fix** moves it.
