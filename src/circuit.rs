@@ -416,6 +416,10 @@ pub fn examples() -> Vec<Circuit> {
         include_str!("../circuits/night_light.json"),
         include_str!("../circuits/fading_led.json"),
         include_str!("../circuits/blinker.json"),
+        include_str!("../circuits/voltage_divider.json"),
+        include_str!("../circuits/led_no_resistor.json"),
+        include_str!("../circuits/battery_short.json"),
+        include_str!("../circuits/two_leds_parallel.json"),
     ]
     .iter()
     .map(|s| serde_json::from_str(s).expect("built-in example parses"))
