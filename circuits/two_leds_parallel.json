@@ -1,0 +1,15 @@
+{
+  "name": "Two LEDs in parallel",
+  "description": "Two LED branches side by side, each with its own 220 Ω resistor. Each branch draws its own current and the battery supplies the sum. Giving each LED its own resistor matters: sharing one lets the LED with the lower forward voltage hog the current.",
+  "rows": 30,
+  "parts": [
+    { "id": "B1", "kind": "battery", "legs": [{ "row": 1, "col": "L+" }, { "row": 1, "col": "L-" }], "value": 5.0 },
+    { "id": "R1", "kind": "resistor", "legs": [{ "row": 5, "col": "L+" }, { "row": 5, "col": "a" }], "value": 220.0 },
+    { "id": "LED1", "kind": "led", "legs": [{ "row": 5, "col": "c" }, { "row": 6, "col": "c" }], "color": "red" },
+    { "id": "W1", "kind": "wire", "legs": [{ "row": 6, "col": "a" }, { "row": 6, "col": "L-" }], "color": "black" },
+    { "id": "R2", "kind": "resistor", "legs": [{ "row": 10, "col": "L+" }, { "row": 10, "col": "a" }], "value": 220.0 },
+    { "id": "LED2", "kind": "led", "legs": [{ "row": 10, "col": "c" }, { "row": 11, "col": "c" }], "color": "green" },
+    { "id": "W2", "kind": "wire", "legs": [{ "row": 11, "col": "a" }, { "row": 11, "col": "L-" }], "color": "black" }
+  ],
+  "expect": { "pass": true, "fault_parts": [] }
+}

@@ -351,19 +351,19 @@ impl App {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let typing = ctx.text_edit_focused();
-        let (undo, redo, save, save_as, open, new) = ctx.input_mut(|i| {
+        let (redo, undo, save_as, save, open, new) = ctx.input_mut(|i| {
             (
-                i.consume_key(Modifiers::COMMAND, Key::Z),
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y),
-                i.consume_key(Modifiers::COMMAND, Key::S),
+                !typing && (i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y)),
+                !typing && i.consume_key(Modifiers::COMMAND, Key::Z),
                 i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::S),
+                i.consume_key(Modifiers::COMMAND, Key::S),
                 i.consume_key(Modifiers::COMMAND, Key::O),
                 i.consume_key(Modifiers::COMMAND, Key::N),
             )
         });
         if redo {
             self.pending = Some(Cmd::Redo);
-        } else if undo && !typing {
+        } else if undo {
             self.pending = Some(Cmd::Undo);
         }
         if save_as {
@@ -392,9 +392,9 @@ impl App {
         let (del, flip, esc, toggle) = ctx.input(|i| {
             (
                 i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace),
-                i.key_pressed(Key::R),
+                pressed_once(i, Key::R),
                 i.key_pressed(Key::Escape),
-                i.key_pressed(Key::Space),
+                pressed_once(i, Key::Space),
             )
         });
         if let Some(id) = self.editor.selected.clone() {
@@ -417,7 +417,7 @@ impl App {
         // 1–9 drop the matching palette part into the first free spot.
         let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
         for (k, kind) in keys.iter().zip(Kind::ALL) {
-            if ctx.input(|i| i.key_pressed(*k) && i.modifiers.is_none()) {
+            if ctx.input(|i| pressed_once(i, *k)) {
                 match self.circuit.add_anywhere(kind) {
                     Some(id) => self.editor.selected = Some(id),
                     None => self.say(ctx, "The board is full."),
@@ -518,7 +518,7 @@ impl App {
                         None => self.say(ui.ctx(), "The board is full."),
                     }
                 }
-                resp.on_hover_text(kind.blurb());
+                resp.on_hover_ui(|ui| part_tooltip(ui, *kind, (i < 9).then_some(i + 1)));
             }
         }
         ui.spacing_mut().item_spacing.y = 6.0;
@@ -571,7 +571,7 @@ impl App {
             ui.label(RichText::new(part.kind.name()).size(14.0));
         });
         ui.label(RichText::new(part.kind.blurb()).color(theme::DIM).size(12.0));
-        ui.add_space(4.0);
+        ui.add_space(8.0);
 
         let presets: &[f64] = match part.kind {
             Kind::Battery => &[1.5, 3.0, 3.3, 5.0, 9.0, 12.0],
@@ -582,16 +582,19 @@ impl App {
         };
         if let (Some(unit), Some(v)) = (part.kind.unit(), part.value) {
             // Free-typed value with SI suffixes, plus common presets.
-            if self.value_text.0 != part.id {
-                self.value_text = (part.id.clone(), fmt_si(v, unit));
+            let key = format!("{}@{v}", part.id);
+            if self.value_text.0 != key {
+                self.value_text = (key, fmt_si(v, unit));
             }
             ui.horizontal(|ui| {
                 ui.label(RichText::new("value").color(theme::DIM));
                 let r = ui.add(egui::TextEdit::singleline(&mut self.value_text.1).desired_width(90.0).font(FontId::monospace(13.0)));
                 if r.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter)) && r.has_focus() {
-                    match parse_si(&self.value_text.1).filter(|x| *x > 0.0) {
-                        Some(x) => part.value = Some(x),
-                        None => {}
+                    // Only commit real edits: re-parsing the rounded display would change the value.
+                    if self.value_text.1.trim() != fmt_si(v, unit) {
+                        if let Some(x) = parse_si(&self.value_text.1).filter(|x| x.is_finite() && *x > 0.0) {
+                            part.value = Some(x);
+                        }
                     }
                     self.value_text.1 = fmt_si(part.value.unwrap_or(v), unit);
                 }
@@ -650,29 +653,37 @@ impl App {
             _ => {}
         }
 
-        ui.add_space(4.0);
-        egui::Grid::new("legs").num_columns(3).spacing(vec2(10.0, 3.0)).show(ui, |ui| {
+        ui.add_space(8.0);
+        let dim = |t: &str| RichText::new(t).color(theme::DIM).size(12.0);
+        let reading = |t: String| RichText::new(t).monospace().color(theme::ACCENT);
+        egui::Grid::new("legs").num_columns(3).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            ui.label(RichText::new("LEG").font(FontId::monospace(10.0)).color(theme::DIM));
+            ui.label(RichText::new("HOLE").font(FontId::monospace(10.0)).color(theme::DIM));
+            ui.label(RichText::new("NGSPICE").font(FontId::monospace(10.0)).color(theme::DIM));
+            ui.end_row();
             for (leg, h) in part.legs.iter().enumerate() {
-                ui.label(RichText::new(part.kind.leg_names()[leg]).color(theme::DIM).size(12.0));
+                ui.label(dim(part.kind.leg_names()[leg]));
                 ui.label(RichText::new(h.short()).monospace());
                 match sim.as_ref().and_then(|s| s.voltage(h)) {
-                    Some(v) => ui.label(RichText::new(format!("{v:.2} V")).monospace().color(theme::ACCENT)),
-                    None => ui.label(""),
+                    Some(v) => ui.label(reading(format!("{v:.2} V"))),
+                    None => ui.label(dim("—")),
                 };
                 ui.end_row();
             }
+            if let Some(i) = sim.as_ref().and_then(|s| s.current(&part.id)) {
+                let what = match part.kind {
+                    Kind::Npn => "collector",
+                    Kind::Battery => "supplying",
+                    _ => "current",
+                };
+                ui.label(dim(what));
+                ui.label("");
+                ui.label(reading(format!("{:.2} mA", milliamps(board::shown_current(part.kind, i)))));
+                ui.end_row();
+            }
         });
-        if let Some(i) = sim.as_ref().and_then(|s| s.current(&part.id)) {
-            let i = if part.kind == Kind::Battery { -i } else { i };
-            let what = match part.kind {
-                Kind::Npn => "collector current",
-                Kind::Battery => "supplying",
-                _ => "current",
-            };
-            ui.label(RichText::new(format!("{what}: {:.3} mA", milliamps(i))).monospace().color(theme::ACCENT));
-        }
 
-        ui.add_space(4.0);
+        ui.add_space(8.0);
         let mut delete = false;
         ui.horizontal(|ui| {
             if ui.button("flip (r)").on_hover_text("Reverse the legs, e.g. to turn an LED around").clicked() {
@@ -689,14 +700,23 @@ impl App {
     fn checks_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             theme::section(ui, "CHECKS");
-            let (color, word) = match (&self.out.error, &self.out.checks) {
-                _ if self.circuit.parts.is_empty() => (theme::DIM, "EMPTY BOARD"),
-                (Some(_), _) => (theme::HI, "NOT SIMULATED"),
-                (None, Some(c)) if c.pass => (theme::ACCENT, "PASS"),
-                (None, Some(_)) => (theme::ALERT, "FAULT"),
-                _ => (theme::DIM, "…"),
+            match (&self.out.error, &self.out.checks) {
+                _ if self.circuit.parts.is_empty() => theme::badge_outline(ui, "EMPTY BOARD", theme::DIM),
+                (Some(_), _) => theme::badge_outline(ui, "NOT SIMULATED", theme::HI),
+                (None, Some(c)) if c.pass => theme::badge(ui, "✔ PASS", theme::ACCENT),
+                (None, Some(_)) => theme::badge(ui, "✖ FAULT", theme::ALERT),
+                _ => theme::badge_outline(ui, "…", theme::DIM),
             };
-            ui.label(RichText::new(word).font(FontId::monospace(13.0)).color(color).strong());
+            if let (None, Some(c)) = (&self.out.error, &self.out.checks) {
+                let count = |sev| c.findings.iter().filter(|f| f.severity == sev).count();
+                let (faults, warns) = (count(Severity::Fault), count(Severity::Warning));
+                if faults > 0 {
+                    ui.label(RichText::new(format!("{faults} fault{}", if faults == 1 { "" } else { "s" })).font(FontId::monospace(11.0)).color(theme::ALERT));
+                }
+                if warns > 0 {
+                    ui.label(RichText::new(format!("{warns} warning{}", if warns == 1 { "" } else { "s" })).font(FontId::monospace(11.0)).color(theme::HI));
+                }
+            }
             // Shares the panel with the scope over time, so skip the caption there.
             if !sim::is_dynamic(&self.circuit) {
                 ui.label(RichText::new("from ngspice + rule checks").font(FontId::monospace(10.5)).color(theme::DIM));
@@ -715,35 +735,57 @@ impl App {
             }
             let mut apply = None;
             if let Some(checks) = &self.out.checks {
-                for f in &checks.findings {
+                // Worst first, so a fault is never buried under OK lines.
+                let mut findings: Vec<_> = checks.findings.iter().collect();
+                findings.sort_by_key(|f| f.severity);
+                for f in findings {
                     let (color, tag) = match f.severity {
-                        Severity::Fault => (theme::ALERT, "FAULT"),
-                        Severity::Warning => (theme::HI, "WARN"),
-                        Severity::Info => (theme::ACCENT, "INFO"),
-                        Severity::Ok => (theme::ACCENT, "OK"),
+                        Severity::Fault => (theme::ALERT, "✖ FAULT"),
+                        Severity::Warning => (theme::HI, "⚠ WARN "),
+                        Severity::Info => (theme::ACCENT, "ℹ INFO "),
+                        Severity::Ok => (theme::ACCENT, "✔ OK   "),
                     };
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(format!("{tag:<5}")).font(FontId::monospace(11.0)).color(color));
-                        let r = ui.add(egui::Label::new(RichText::new(&f.headline).size(13.5)).sense(Sense::click()));
-                        if r.clicked() {
-                            self.editor.selected = Some(f.part.clone());
-                        }
-                        r.on_hover_text(&f.detail);
-                        if let Some(fix) = &f.fix {
-                            if ui.small_button(RichText::new("apply fix").color(theme::ACCENT)).clicked() {
-                                apply = Some(fix.clone());
+                    let quiet = matches!(f.severity, Severity::Info | Severity::Ok);
+                    let stroke = if quiet { Color32::TRANSPARENT } else { color };
+                    ui.add_space(2.0);
+                    egui::Frame::new()
+                        .stroke(Stroke::new(1.0, stroke))
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal_wrapped(|ui| {
+                                match f.severity {
+                                    Severity::Fault => theme::badge(ui, tag, color),
+                                    Severity::Warning => theme::badge_outline(ui, tag.trim_end(), color),
+                                    _ => ui.label(RichText::new(tag).font(FontId::monospace(11.0)).color(color)),
+                                };
+                                let r = ui.add(egui::Label::new(RichText::new(&f.headline).size(13.5)).sense(Sense::click()));
+                                if r.clicked() {
+                                    self.editor.selected = Some(f.part.clone());
+                                }
+                                r.on_hover_text(&f.detail);
+                                if let Some(fix) = &f.fix {
+                                    if ui.small_button(RichText::new("apply fix").color(theme::ACCENT)).clicked() {
+                                        apply = Some(fix.clone());
+                                    }
+                                }
+                            });
+                            if f.severity != Severity::Ok {
+                                ui.label(RichText::new(&f.detail).color(theme::DIM).size(12.0));
                             }
-                        }
-                    });
-                    if f.severity != Severity::Ok {
-                        ui.label(RichText::new(&f.detail).color(theme::DIM).size(12.0));
-                    }
+                        });
                 }
             }
             if let Some(fix) = apply {
-                if let Some(p) = self.circuit.part_mut(&fix.part) {
+                if let Some(p) = self.circuit.part(&fix.part) {
+                    let mut legs = p.legs.clone();
                     for (leg, to) in fix.moves {
-                        p.legs[leg] = to;
+                        if let Some(l) = legs.get_mut(leg) {
+                            *l = to;
+                        }
+                    }
+                    if self.circuit.fits(&legs, Some(&fix.part)) {
+                        self.circuit.part_mut(&fix.part).unwrap().legs = legs;
                     }
                 }
             }
@@ -849,6 +891,7 @@ impl App {
                 ("why isn't it working?", "Why isn't my circuit doing what I expect? Walk me through it."),
                 ("explain", "Explain how this circuit works, step by step, following the current."),
                 ("ideas", "Suggest a few experiments or next circuits I could build from here."),
+                ("build one for me", "Propose a small working circuit I could build next, using the parts in the bin, and fill in `circuit` so it loads onto the board."),
             ] {
                 if ui.add_enabled(!busy, egui::Button::new(RichText::new(label).size(12.5))).clicked() {
                     ask = Some(q.to_string());
@@ -860,6 +903,7 @@ impl App {
         // Input pinned to the bottom, conversation above it.
         let input_h = 74.0;
         let log_h = (ui.available_height() - input_h).max(80.0);
+        let mut load_proposal = None;
         egui::ScrollArea::vertical().max_height(log_h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
             if self.chat.is_empty() {
                 ui.add_space(8.0);
@@ -877,6 +921,7 @@ impl App {
                         ui.colored_label(theme::ALERT, e);
                     }
                     Entry::Reply(r) => {
+                        ui.label(RichText::new("GEMINI · AI, not simulated").font(FontId::monospace(10.0)).color(theme::DIM));
                         ui.label(&r.message);
                         for issue in &r.issues {
                             if issue_card(ui, issue, &mut self.editor.selected) {
@@ -887,6 +932,21 @@ impl App {
                             ui.add_space(2.0);
                             ui.label(RichText::new(format!("+ {}", idea.title.to_lowercase())).color(theme::ACCENT));
                             ui.label(RichText::new(&idea.description).color(theme::TEXT));
+                        }
+                        if let Some(c) = &r.circuit {
+                            theme::card(theme::BG, theme::EDGE).show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(RichText::new("PROPOSED CIRCUIT").font(FontId::monospace(10.5)).color(theme::HI));
+                                ui.label(RichText::new(&c.name).strong());
+                                if !c.description.is_empty() {
+                                    ui.label(RichText::new(&c.description).size(12.5));
+                                }
+                                let ids: Vec<&str> = c.parts.iter().map(|p| p.id.as_str()).collect();
+                                ui.label(RichText::new(ids.join(", ")).font(FontId::monospace(10.5)).color(theme::DIM));
+                                if ui.add_enabled(!busy, egui::Button::new(RichText::new("load onto board").color(theme::ACCENT))).on_hover_text("Replaces the board (Ctrl+Z undoes it). ngspice simulates it like any other circuit.").clicked() {
+                                    load_proposal = Some(c.clone());
+                                }
+                            });
                         }
                     }
                 }
@@ -918,6 +978,15 @@ impl App {
         });
         if let Some(q) = ask {
             self.ask(ui.ctx(), q);
+        }
+        if let Some(c) = load_proposal {
+            match assistant::check_proposal(&c) {
+                Ok(c) => {
+                    self.pending = Some(Cmd::Load(c));
+                    self.say(ui.ctx(), "Loaded Gemini's circuit. Ctrl+Z to undo.");
+                }
+                Err(e) => self.chat.push(Entry::Error(format!("Couldn't load that circuit: {e}"))),
+            }
         }
         hovered_parts
     }
@@ -1058,7 +1127,7 @@ fn issue_card(ui: &mut egui::Ui, issue: &Issue, selected: &mut Option<String>) -
         });
         ui.label(RichText::new(&issue.explanation));
         if !issue.suggestion.is_empty() {
-            ui.label(RichText::new(format!("→ {}", issue.suggestion)).color(theme::ACCENT));
+            ui.label(RichText::new(format!("fix: {}", issue.suggestion)).color(theme::ACCENT));
         }
         if !issue.parts.is_empty() {
             ui.label(RichText::new(format!("parts: {}  ·  click to select", issue.parts.join(", "))).font(FontId::monospace(10.5)).color(theme::DIM));
@@ -1127,9 +1196,38 @@ fn status(ui: &mut egui::Ui, key: &str, value: &str, color: Color32) {
     ui.label(RichText::new(key).font(FontId::monospace(11.0)).color(theme::LOW));
 }
 
+/// True on the initial press of `key` with no modifiers, ignoring key-repeat.
+fn pressed_once(i: &egui::InputState, key: Key) -> bool {
+    i.events.iter().any(|e| {
+        matches!(e, egui::Event::Key { key: k, pressed: true, repeat: false, modifiers, .. }
+            if *k == key && modifiers.is_none())
+    })
+}
+
 fn code_block(ui: &mut egui::Ui, text: &str) {
     theme::card(theme::BG, theme::EDGE).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.add(egui::Label::new(RichText::new(text).font(FontId::monospace(11.0))).wrap());
     });
+}
+
+/// Parts-bin hover card: what the part is, its legs (polarity), default value and shortcut.
+fn part_tooltip(ui: &mut egui::Ui, kind: Kind, key: Option<usize>) {
+    ui.set_max_width(260.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(kind.name()).strong().color(theme::HI));
+        ui.label(RichText::new(format!("{}1, {}2…", kind.id_prefix(), kind.id_prefix())).font(FontId::monospace(10.5)).color(theme::DIM));
+    });
+    ui.label(kind.blurb());
+    ui.add_space(2.0);
+    let legs = kind.leg_names().join(" · ");
+    ui.label(RichText::new(format!("legs     {legs}")).font(FontId::monospace(11.0)).color(theme::DIM));
+    if let (Some(v), Some(unit)) = (kind.default_value(), kind.unit()) {
+        ui.label(RichText::new(format!("default  {}", fmt_si(v, unit))).font(FontId::monospace(11.0)).color(theme::DIM));
+    }
+    let how = match key {
+        Some(k) => format!("drag onto the board, click, or press {k}"),
+        None => "drag onto the board, or click".into(),
+    };
+    ui.label(RichText::new(how).size(11.5).color(theme::DIM));
 }
