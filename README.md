@@ -6,6 +6,8 @@ The simulator supplies the numbers; Gemini supplies the teaching. Every voltage 
 
 ![A wrong-row LED circuit flagged as a fault, with the fix shown as a ghost](docs/screenshots/02-fault-wrong-row.png)
 
+**Demo video:** [docs/demo.mp4](docs/demo.mp4) (under 2 minutes: find a fault, fix it, build an LED circuit from scratch, switch a transistor, see the schematic).
+
 ## What it does
 
 **Spot the mistake.** The rule checker reads the simulated numbers and flags faults on the board. Here, the resistor ends in row 14 but the LED's anode sits in row 15, so no current flows. A ghost marks where the leg should go, and **apply fix** moves it.
@@ -26,16 +28,23 @@ The simulator supplies the numbers; Gemini supplies the teaching. Every voltage 
 
 **Ask the lab partner.** "review", "why isn't it working?", "explain" and "ideas" send the circuit, nets, simulation results and rule findings to Gemini. "build one for me" asks Gemini to propose a circuit that loads onto the board, where ngspice simulates it like any other.
 
+## How it works
+
+1. **Editor.** Parts snap onto breadboard holes. Holes a–e and f–j in the same row are connected, plus four power rails, just like a real breadboard.
+2. **Simulation.** Every edit rebuilds a SPICE netlist and runs `ngspice` on a background thread. Zero-volt sources act as ammeters on each leg. Circuits with capacitors run a live transient simulation, plotted on the SCOPE panel.
+3. **Rule checks.** A checker reads the simulated numbers and reports faults in plain language: an LED that draws no current, an LED plugged in backwards, too much current with no resistor, a shorted battery, a leg in the wrong row. Faults it can fix get an **apply fix** button.
+4. **Lab partner.** Gemini receives the circuit, the nets, the ngspice results, the rule findings and the netlist, and replies with structured JSON: a message, issues tied to part ids (hover one to highlight the parts), and ideas to try.
+
 ## Running it
 
-You need Rust and [ngspice](https://ngspice.sourceforge.io/) on your PATH.
+You need Rust and [ngspice](https://ngspice.sourceforge.io/) on your PATH (`brew install ngspice` on macOS, `sudo apt install ngspice` on Debian/Ubuntu).
 
 ```sh
 cp .env.example .env   # then add your GEMINI_API_KEY
 cargo run
 ```
 
-Open **examples** for ready-made circuits (LED, transistor switch, night light, fading LED, blinker and more), or pass one on the command line: `cargo run -- circuits/pot_dimmer.json --split`.
+Open **examples** for ready-made circuits (LED, transistor switch, pot dimmer, night light, fading LED, blinker, voltage divider, two LEDs in parallel, and broken ones to debug: wrong row, reversed LED, no resistor, battery short), or pass one on the command line: `cargo run -- circuits/pot_dimmer.json --split`.
 
 The app works without a Gemini key; only the lab partner is disabled. `GEMINI_MODEL` and `NGSPICE_PATH` in `.env` are optional.
 
@@ -46,7 +55,7 @@ cargo test                                         # needs ngspice for the simul
 cargo test gemini_live -- --ignored --nocapture    # live Gemini call, needs GEMINI_API_KEY
 ```
 
-Every example in `circuits/` has an `expect` block the tests check against the simulation.
+Every example in `circuits/` has an `expect` block that the tests check against the simulation, so the examples double as regression tests.
 
 ## Layout
 
@@ -56,3 +65,9 @@ Every example in `circuits/` has an `expect` block the tests check against the s
 - `src/ui/`: breadboard editor, schematic, theme
 - `src/app.rs`: panels, undo/redo, save/open
 - `circuits/`: example circuits
+
+## What's next
+
+- Probe a physical breadboard with an Arduino UNO Q and compare the real readings with the simulation.
+- More parts, starting with the 555 timer.
+- Talk to the lab partner by voice with the Gemini Live API.

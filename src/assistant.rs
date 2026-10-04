@@ -15,6 +15,10 @@ pub struct Reply {
     pub issues: Vec<Issue>,
     #[serde(default)]
     pub ideas: Vec<Idea>,
+    /// A circuit Gemini proposes, in the same JSON shape as `circuits/*.json`.
+    /// Checked with `check_proposal` before it can be loaded onto the board.
+    #[serde(default)]
+    pub circuit: Option<Circuit>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -53,14 +57,27 @@ run the full length of the board. A hole is written like c14 (column c, row 14) 
 Parts: polar parts list leg 0 first: battery +, LED anode (long leg), diode anode, NPN collector/base/emitter, pot end A/wiper/end B.
 
 Each message includes the current circuit, its nets, an ngspice DC operating point and the app's rule-checker findings. \
-When you quote voltages or currents, use the simulated numbers given; if something wasn't simulated, say so rather than guessing. \
+Numbers: every voltage, current, resistance or power you state as a reading must appear in that context. Never work out a new one \
+(no Ohm's-law or power arithmetic, no \"after the fix it would draw about 15 mA\"), and never guess a state that wasn't simulated, \
+such as a button that isn't pressed: say \"press it and the readouts will show the current\" instead. You may suggest a part value \
+to try (\"try 330 Ω\") or name a typical rating (\"LEDs are usually rated around 20 mA\"), worded as a suggestion or a rating, not a reading. \
 Without capacitors the numbers are a DC operating point. With capacitors the app runs a live transient simulation: \
 the numbers are instantaneous values at simulated time t, capacitors carry charge from moment to moment, and LEDs may blink or fade. Push buttons and slide switches are open unless marked pressed/on. \
 A photoresistor's resistance is set by its light level (given with the part), from about 1 MΩ dark to 1 kΩ bright.
 
-Reply as JSON. `message` is plain text (no markdown, no bullet characters), a few short paragraphs at most. \
+Reply as JSON. `message` is plain text (no markdown, no bullet characters): at most 3 short sentences, or up to 6 when the user asks \
+you to explain or walk through something. Put details in `issues`, not the message. Use everyday words, and explain a term like \
+anode, forward voltage or base in a few words the first time you use it. \
 `issues` lists concrete problems or risks, each tied to part ids, with a clear fix in `suggestion`; leave it empty if there are none. \
-`ideas` lists experiments or extensions the user could build next with these parts; include ideas only when asked or when the circuit works.";
+`ideas` lists experiments or extensions the user could build next with these parts; include ideas only when asked or when the circuit works.
+
+`circuit` is optional. Fill it only when the user asks you to build, design or propose a circuit; otherwise leave it out. \
+It is loaded straight onto the board and then simulated by ngspice, so it must be physically valid: every part has exactly \
+its legs (battery 2, wire 2, resistor 2, led 2, button 2, capacitor 2, diode 2, ldr 2, switch 2, pot 3, npn 3) in polar leg order, ids are \
+unique (B1, R1, LED1, W1, SW1, POT1, C1, D1, Q1), no two legs share a hole, rows stay within 1..30, and every part is wired \
+into a closed loop with the battery. Put the battery's legs on the rails (L+ and L- in row 1), connect rails to rows with \
+wires, and always give an LED a series resistor. Give `value` for batteries (volts), resistors and pots (ohms) and \
+capacitors (farads). Do not state simulated numbers for a proposed circuit; the app will simulate it.";
 
 const REPLY_SCHEMA: &str = r#"{
   "type": "object",
@@ -76,7 +93,21 @@ const REPLY_SCHEMA: &str = r#"{
     "ideas": { "type": "array", "items": { "type": "object", "properties": {
       "title": { "type": "string" },
       "description": { "type": "string" }
-    }, "required": ["title", "description"] } }
+    }, "required": ["title", "description"] } },
+    "circuit": { "type": "object", "properties": {
+      "name": { "type": "string" },
+      "description": { "type": "string" },
+      "parts": { "type": "array", "items": { "type": "object", "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string", "enum": ["battery", "wire", "resistor", "led", "button", "pot", "capacitor", "diode", "npn", "ldr", "switch"] },
+        "legs": { "type": "array", "items": { "type": "object", "properties": {
+          "row": { "type": "integer" },
+          "col": { "type": "string", "enum": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "L+", "L-", "R+", "R-"] }
+        }, "required": ["row", "col"] } },
+        "value": { "type": "number" },
+        "color": { "type": "string" }
+      }, "required": ["id", "kind", "legs"] } }
+    }, "required": ["name", "description", "parts"] }
   },
   "required": ["message", "issues", "ideas"]
 }"#;
@@ -114,12 +145,19 @@ impl Gemini {
                 .header("x-goog-api-key", &self.api_key)
                 .config()
                 .http_status_as_error(false)
+                // Without a timeout a dead connection leaves the lab partner spinning forever.
+                .timeout_global(Some(std::time::Duration::from_secs(45)))
                 .build()
                 .send_json(&body)
                 .context("calling Gemini")?;
             let status = resp.status();
-            let reply: Value = resp.body_mut().read_json().context("reading Gemini response")?;
+            // Read as text first: 5xx errors are often HTML, and must still reach the retry below.
+            let raw = resp.body_mut().read_to_string().context("reading Gemini response")?;
+            let reply: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
             if status.is_success() {
+                if reply.is_null() {
+                    bail!("Gemini returned something that isn't JSON: {raw}");
+                }
                 break reply;
             }
             let transient = matches!(status.as_u16(), 429 | 500 | 503 | 504);
@@ -137,6 +175,52 @@ impl Gemini {
             .ok_or_else(|| anyhow!("Gemini response had no text part: {reply}"))?;
         serde_json::from_str(text).with_context(|| format!("Gemini reply did not match the schema: {text}"))
     }
+}
+
+/// Checks a circuit Gemini proposed before it goes on the board: right leg count per
+/// part, unique ids, every hole on a 30/45/60-row board and used once. Missing values
+/// get the part's default. The result is only a layout; ngspice still supplies every number.
+pub fn check_proposal(proposed: &Circuit) -> std::result::Result<Circuit, String> {
+    if proposed.parts.is_empty() {
+        return Err("The proposed circuit has no parts.".into());
+    }
+    let max_row = proposed.parts.iter().flat_map(|p| p.legs.iter().map(|h| h.row)).max().unwrap_or(1);
+    let rows = [30u8, 45, 60].into_iter().find(|r| max_row <= *r).ok_or(format!("A leg is in row {max_row}; the biggest board has 60 rows."))?;
+    let mut c = Circuit {
+        name: proposed.name.trim().to_string(),
+        description: format!("Proposed by Gemini. {}", proposed.description.trim()).trim().to_string(),
+        rows,
+        parts: Vec::new(),
+        expect: None,
+    };
+    if c.name.is_empty() {
+        c.name = "Gemini's circuit".into();
+    }
+    for p in &proposed.parts {
+        let want = p.kind.leg_names().len();
+        if p.legs.len() != want {
+            return Err(format!("{} is a {} with {} legs; it needs {want}.", p.id, p.kind.name().to_lowercase(), p.legs.len()));
+        }
+        if p.id.trim().is_empty() || c.part(&p.id).is_some() {
+            return Err(format!("Part id \"{}\" is empty or used twice.", p.id));
+        }
+        if let Some(h) = p.legs.iter().find(|h| h.row == 0) {
+            return Err(format!("{} has a leg in row 0; rows start at 1 ({}).", p.id, h.short()));
+        }
+        if !c.fits(&p.legs, None) {
+            return Err(format!("{} would share a hole with another leg.", p.id));
+        }
+        let mut part = p.clone();
+        part.value = match p.kind.unit() {
+            Some(_) => p.value.filter(|v| v.is_finite() && *v > 0.0).or(p.kind.default_value()),
+            None => None,
+        };
+        part.pressed = false;
+        c.parts.push(part);
+    }
+    // Same rules as opening a file (also catches ids ngspice can't use, like "R 1").
+    c.validate().map_err(|e| format!("{e:#}"))?;
+    Ok(c)
 }
 
 /// Plain-text snapshot of the circuit and its simulation for the prompt.
@@ -216,6 +300,47 @@ pub fn context(circuit: &Circuit, out: &Output) -> String {
 mod tests {
     use super::*;
 
+    /// A canned Gemini reply with a proposed circuit loads and simulates without a key.
+    #[test]
+    fn proposed_circuit_loads_and_simulates() {
+        let text = r#"{
+          "message": "Here's a red LED with a current-limiting resistor.",
+          "issues": [], "ideas": [],
+          "circuit": { "name": "Red LED", "description": "5 V, 220 ohm, red LED.", "parts": [
+            { "id": "B1", "kind": "battery", "legs": [{"row": 1, "col": "L+"}, {"row": 1, "col": "L-"}], "value": 5 },
+            { "id": "W1", "kind": "wire", "legs": [{"row": 5, "col": "L+"}, {"row": 5, "col": "a"}], "color": "red" },
+            { "id": "R1", "kind": "resistor", "legs": [{"row": 5, "col": "c"}, {"row": 10, "col": "c"}] },
+            { "id": "LED1", "kind": "led", "legs": [{"row": 10, "col": "d"}, {"row": 11, "col": "d"}], "color": "red" },
+            { "id": "W2", "kind": "wire", "legs": [{"row": 11, "col": "a"}, {"row": 11, "col": "L-"}], "color": "black" }
+          ] }
+        }"#;
+        let reply: Reply = serde_json::from_str(text).unwrap();
+        let c = check_proposal(reply.circuit.as_ref().unwrap()).unwrap();
+        assert_eq!(c.part("R1").unwrap().value, Some(220.0), "missing value falls back to the default");
+        assert!(c.description.starts_with("Proposed by Gemini."));
+
+        let ng = crate::sim::ngspice::Ngspice { binary: crate::Config::from_env().ngspice };
+        if ng.probe().is_none() {
+            return;
+        }
+        let out = crate::sim::run(&c, &ng);
+        assert!(out.checks.unwrap().pass);
+        assert!(out.sim.unwrap().current("LED1").unwrap() > 5e-3);
+    }
+
+    #[test]
+    fn bad_proposals_are_rejected() {
+        let parse = |parts: &str| serde_json::from_str::<Circuit>(&format!(r#"{{"name": "x", "parts": {parts}}}"#)).unwrap();
+        let shared = parse(r#"[{"id": "R1", "kind": "resistor", "legs": [{"row": 5, "col": "c"}, {"row": 9, "col": "c"}]},
+                              {"id": "R2", "kind": "resistor", "legs": [{"row": 9, "col": "c"}, {"row": 12, "col": "c"}]}]"#);
+        assert!(check_proposal(&shared).is_err());
+        let three_legged_led = parse(r#"[{"id": "LED1", "kind": "led", "legs": [{"row": 1, "col": "a"}, {"row": 2, "col": "a"}, {"row": 3, "col": "a"}]}]"#);
+        assert!(check_proposal(&three_legged_led).is_err());
+        let off_board = parse(r#"[{"id": "R1", "kind": "resistor", "legs": [{"row": 70, "col": "c"}, {"row": 72, "col": "c"}]}]"#);
+        assert!(check_proposal(&off_board).is_err());
+        assert!(check_proposal(&parse("[]")).is_err());
+    }
+
     /// Live call. `cargo test gemini_live -- --ignored --nocapture` (set GEMINI_MODEL to try another model)
     #[test]
     #[ignore]
@@ -224,7 +349,7 @@ mod tests {
         let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
         let model = std::env::var("GEMINI_MODEL").unwrap_or(crate::GEMINI_MODELS[0].into());
         let circuit = crate::circuit::examples().into_iter().find(|c| c.name == "LED, wrong row").unwrap();
-        let out = crate::sim::run(&circuit, &crate::sim::ngspice::Ngspice { binary: "ngspice".into() });
+        let out = crate::sim::run(&circuit, &crate::sim::ngspice::Ngspice { binary: crate::Config::from_env().ngspice });
         let reply = Gemini { api_key, model: model.clone() }
             .ask(&[], &context(&circuit, &out), "Review my circuit. Why isn't my LED lighting up?")
             .unwrap();

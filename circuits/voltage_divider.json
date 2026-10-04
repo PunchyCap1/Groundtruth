@@ -1,0 +1,12 @@
+{
+  "name": "Voltage divider",
+  "description": "Two resistors in series split the battery voltage. The middle row sits at 5 V × 4.7k / (10k + 4.7k) ≈ 1.6 V. Swap R2 for a bigger value and watch the middle voltage rise.",
+  "rows": 30,
+  "parts": [
+    { "id": "B1", "kind": "battery", "legs": [{ "row": 1, "col": "L+" }, { "row": 1, "col": "L-" }], "value": 5.0 },
+    { "id": "R1", "kind": "resistor", "legs": [{ "row": 5, "col": "L+" }, { "row": 5, "col": "a" }], "value": 10000.0 },
+    { "id": "R2", "kind": "resistor", "legs": [{ "row": 5, "col": "c" }, { "row": 9, "col": "c" }], "value": 4700.0 },
+    { "id": "W1", "kind": "wire", "legs": [{ "row": 9, "col": "a" }, { "row": 9, "col": "L-" }], "color": "black" }
+  ],
+  "expect": { "pass": true, "fault_parts": [] }
+}

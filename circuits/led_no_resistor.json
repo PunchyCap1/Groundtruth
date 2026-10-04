@@ -1,0 +1,12 @@
+{
+  "name": "LED, no resistor",
+  "description": "The LED is wired straight to the battery with nothing to limit the current. It would draw far more than its ~20 mA rating and burn out. Fix: put a 220 Ω resistor in series.",
+  "rows": 30,
+  "parts": [
+    { "id": "B1", "kind": "battery", "legs": [{ "row": 1, "col": "L+" }, { "row": 1, "col": "L-" }], "value": 5.0 },
+    { "id": "W1", "kind": "wire", "legs": [{ "row": 5, "col": "L+" }, { "row": 5, "col": "a" }], "color": "red" },
+    { "id": "LED1", "kind": "led", "legs": [{ "row": 5, "col": "c" }, { "row": 6, "col": "c" }], "color": "red" },
+    { "id": "W2", "kind": "wire", "legs": [{ "row": 6, "col": "a" }, { "row": 6, "col": "L-" }], "color": "black" }
+  ],
+  "expect": { "pass": false, "fault_parts": ["LED1"] }
+}
