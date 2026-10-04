@@ -1,0 +1,212 @@
+{
+  "name": "LED blinker",
+  "description": "Two transistors take turns: when one turns on, its capacitor yanks the other's base below 0 V until the capacitor recharges through RB1 or RB2. LED1 and LED2 swap about twice a second. Bigger capacitors or base resistors blink slower.",
+  "rows": 30,
+  "parts": [
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 3,
+          "col": "L+"
+        },
+        {
+          "row": 3,
+          "col": "a"
+        }
+      ],
+      "value": 330.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 3,
+          "col": "c"
+        },
+        {
+          "row": 6,
+          "col": "c"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "Q1",
+      "kind": "npn",
+      "legs": [
+        {
+          "row": 6,
+          "col": "e"
+        },
+        {
+          "row": 7,
+          "col": "e"
+        },
+        {
+          "row": 8,
+          "col": "e"
+        }
+      ]
+    },
+    {
+      "id": "RB1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 7,
+          "col": "L+"
+        },
+        {
+          "row": 7,
+          "col": "a"
+        }
+      ],
+      "value": 47000.0
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 8,
+          "col": "a"
+        },
+        {
+          "row": 8,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "R2",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 13,
+          "col": "L+"
+        },
+        {
+          "row": 13,
+          "col": "a"
+        }
+      ],
+      "value": 330.0
+    },
+    {
+      "id": "LED2",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 13,
+          "col": "c"
+        },
+        {
+          "row": 16,
+          "col": "c"
+        }
+      ],
+      "color": "green"
+    },
+    {
+      "id": "Q2",
+      "kind": "npn",
+      "legs": [
+        {
+          "row": 16,
+          "col": "e"
+        },
+        {
+          "row": 17,
+          "col": "e"
+        },
+        {
+          "row": 18,
+          "col": "e"
+        }
+      ]
+    },
+    {
+      "id": "RB2",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 17,
+          "col": "L+"
+        },
+        {
+          "row": 17,
+          "col": "a"
+        }
+      ],
+      "value": 47000.0
+    },
+    {
+      "id": "W2",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 18,
+          "col": "a"
+        },
+        {
+          "row": 18,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "C1",
+      "kind": "capacitor",
+      "legs": [
+        {
+          "row": 6,
+          "col": "d"
+        },
+        {
+          "row": 17,
+          "col": "d"
+        }
+      ],
+      "value": 1e-05
+    },
+    {
+      "id": "C2",
+      "kind": "capacitor",
+      "legs": [
+        {
+          "row": 16,
+          "col": "b"
+        },
+        {
+          "row": 7,
+          "col": "b"
+        }
+      ],
+      "value": 1e-05
+    }
+  ],
+  "expect": {
+    "pass": true,
+    "fault_parts": []
+  }
+}

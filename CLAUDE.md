@@ -7,7 +7,7 @@ A drag-and-drop breadboard playground for learning electronics. Users build circ
 ## How it works
 
 1. **Editor (`src/ui/board.rs`):** parts are dragged from the parts bin onto holes. Parts and single legs can be dragged; dragging from an empty hole draws a wire. Breadboard connectivity comes from `Hole::net_key` (a–e and f–j per row, plus four rails).
-2. **Simulation (`src/sim/`):** every edit rebuilds a SPICE netlist (`netlist.rs`), runs `ngspice -b` on a worker thread (`ngspice.rs`), and runs the rule checks (`checks.rs`). 0 V sources in series act as ammeters on legs.
+2. **Simulation (`src/sim/`):** every edit rebuilds a SPICE netlist (`netlist.rs`), runs `ngspice -b` on a worker thread (`ngspice.rs`), and runs the rule checks (`checks.rs`). 0 V sources in series act as ammeters on legs. Circuits without capacitors get a DC operating point. Circuits with capacitors run live transient simulation: back-to-back `.tran` chunks sized to wall-clock time, carrying capacitor and node voltages between chunks in `TranState` (`sim::run_tran`). The SCOPE panel plots the last 5 s, and an LED that blinks or fades is reported as info, not as a fault.
 3. **Schematic (`src/ui/schematic.rs`):** generated from the same circuit. Wires merge nets, nets are stacked by simulated voltage, and selection syncs with the breadboard.
 4. **Lab partner (`src/assistant.rs`):** sends the circuit, nets, sim results, rule findings and netlist to Gemini, and gets structured JSON back (`message`, `issues` tied to part ids, `ideas`). Hovering an issue highlights its parts.
 
@@ -20,7 +20,7 @@ A drag-and-drop breadboard playground for learning electronics. Users build circ
 ## Scope (in priority order)
 
 1. **Must have:** drag-and-drop breadboard editor, live ngspice readouts and rule checks, Gemini review/chat, schematic view, example circuits, save/open.
-2. **Should have:** UNO Q probe readings vs. simulation, more parts (photoresistor, switch, 555), transient sim (blinking).
+2. **Should have:** UNO Q probe readings vs. simulation, more parts (555, …). Done: photoresistor, slide switch, transient sim.
 3. **Stretch:** Gemini proposes circuits that load onto the board, voice via the Gemini Live API.
 
 Don't start tier 2 or 3 work while tier 1 is broken. When unsure, ask which tier a task belongs to.
@@ -28,10 +28,10 @@ Don't start tier 2 or 3 work while tier 1 is broken. When unsure, ask which tier
 ## Demo script (keep this working)
 
 1. Open Examples → "LED, wrong row". The board outline is red, CHECKS shows the fault, and a green ghost shows the fix.
-2. Click "Why isn't it working?" Gemini explains the row gap and highlights R1/LED1.
-3. Click "Apply fix". The LED lights and the board turns green.
+2. Click "why isn't it working?" Gemini explains the row gap and highlights R1/LED1.
+3. Click "apply fix". The LED lights and the board turns green.
 4. Start from New: drag a battery, resistor, LED and wires. Readouts update live.
-5. Open "Transistor switch", select SW1, hold Space. The LED lights. Switch to SCHEMATIC.
+5. Open "Transistor switch", select SW1, hold Space. The LED lights. Switch to schematic.
 
 ## Repo layout
 

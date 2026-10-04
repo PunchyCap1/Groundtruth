@@ -1,6 +1,6 @@
 //! Gemini lab partner: reviews the circuit, answers questions, suggests experiments.
 
-use crate::circuit::{Circuit, Kind};
+use crate::circuit::{Circuit, Kind, fmt_si};
 use crate::sim::checks::milliamps;
 use crate::sim::{Output, Severity};
 use anyhow::{Context, Result, anyhow, bail};
@@ -58,7 +58,9 @@ Parts: polar parts list leg 0 first: battery +, LED anode (long leg), diode anod
 
 Each message includes the current circuit, its nets, an ngspice DC operating point and the app's rule-checker findings. \
 When you quote voltages or currents, use the simulated numbers given; if something wasn't simulated, say so rather than guessing. \
-Capacitors are open in a DC operating point. Push buttons are open unless marked pressed.
+Without capacitors the numbers are a DC operating point. With capacitors the app runs a live transient simulation: \
+the numbers are instantaneous values at simulated time t, capacitors carry charge from moment to moment, and LEDs may blink or fade. Push buttons and slide switches are open unless marked pressed/on. \
+A photoresistor's resistance is set by its light level (given with the part), from about 1 MΩ dark to 1 kΩ bright.
 
 Reply as JSON. `message` is plain text (no markdown, no bullet characters), a few short paragraphs at most. \
 `issues` lists concrete problems or risks, each tied to part ids, with a clear fix in `suggestion`; leave it empty if there are none. \
@@ -66,7 +68,7 @@ Reply as JSON. `message` is plain text (no markdown, no bullet characters), a fe
 
 `circuit` is optional. Fill it only when the user asks you to build, design or propose a circuit; otherwise leave it out. \
 It is loaded straight onto the board and then simulated by ngspice, so it must be physically valid: every part has exactly \
-its legs (battery 2, wire 2, resistor 2, led 2, button 2, capacitor 2, diode 2, pot 3, npn 3) in polar leg order, ids are \
+its legs (battery 2, wire 2, resistor 2, led 2, button 2, capacitor 2, diode 2, ldr 2, switch 2, pot 3, npn 3) in polar leg order, ids are \
 unique (B1, R1, LED1, W1, SW1, POT1, C1, D1, Q1), no two legs share a hole, rows stay within 1..30, and every part is wired \
 into a closed loop with the battery. Put the battery's legs on the rails (L+ and L- in row 1), connect rails to rows with \
 wires, and always give an LED a series resistor. Give `value` for batteries (volts), resistors and pots (ohms) and \
@@ -92,7 +94,7 @@ const REPLY_SCHEMA: &str = r#"{
       "description": { "type": "string" },
       "parts": { "type": "array", "items": { "type": "object", "properties": {
         "id": { "type": "string" },
-        "kind": { "type": "string", "enum": ["battery", "wire", "resistor", "led", "button", "pot", "capacitor", "diode", "npn"] },
+        "kind": { "type": "string", "enum": ["battery", "wire", "resistor", "led", "button", "pot", "capacitor", "diode", "npn", "ldr", "switch"] },
         "legs": { "type": "array", "items": { "type": "object", "properties": {
           "row": { "type": "integer" },
           "col": { "type": "string", "enum": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "L+", "L-", "R+", "R-"] }
@@ -216,6 +218,9 @@ pub fn context(circuit: &Circuit, out: &Output) -> String {
         let _ = writeln!(s, "{}", circuit.description);
     }
 
+    if let Some(t) = sim.and_then(|s| s.time) {
+        let _ = writeln!(s, "\nSIMULATION: live transient at t = {t:.3} s. Values below are instantaneous.");
+    }
     let _ = writeln!(s, "\nPARTS:");
     if circuit.parts.is_empty() {
         let _ = writeln!(s, "(empty board)");
@@ -226,7 +231,14 @@ pub fn context(circuit: &Circuit, out: &Output) -> String {
         let mut extra = String::new();
         match p.kind {
             Kind::Button => extra = if p.pressed { " [pressed]".into() } else { " [not pressed]".into() },
+            Kind::Switch => extra = if p.pressed { " [on]".into() } else { " [off]".into() },
             Kind::Pot => extra = format!(" [wiper at {:.0}% from end A]", p.wiper * 100.0),
+            Kind::Capacitor => {
+                if let Some((a, b)) = sim.and_then(|s| Some((s.voltage(&p.legs[0])?, s.voltage(&p.legs[1])?))) {
+                    extra = format!(" [charged to {:.3} V]", a - b);
+                }
+            }
+            Kind::Ldr => extra = format!(" [light {:.0}%, {}]", p.light * 100.0, fmt_si(p.ldr_ohms(), "Ω")),
             _ => {}
         }
         let current = sim.and_then(|s| s.current(&p.id)).map(|i| format!(", current {:.3} mA", milliamps(i))).unwrap_or_default();
