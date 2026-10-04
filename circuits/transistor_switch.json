@@ -1,0 +1,148 @@
+{
+  "name": "Transistor switch",
+  "description": "A tiny base current through R2 switches the LED current through Q1. Press SW1.",
+  "rows": 30,
+  "parts": [
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 5,
+          "col": "L+"
+        },
+        {
+          "row": 5,
+          "col": "a"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 5,
+          "col": "c"
+        },
+        {
+          "row": 9,
+          "col": "c"
+        }
+      ],
+      "value": 330.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 9,
+          "col": "d"
+        },
+        {
+          "row": 10,
+          "col": "d"
+        }
+      ],
+      "color": "blue"
+    },
+    {
+      "id": "Q1",
+      "kind": "npn",
+      "legs": [
+        {
+          "row": 10,
+          "col": "e"
+        },
+        {
+          "row": 11,
+          "col": "e"
+        },
+        {
+          "row": 12,
+          "col": "e"
+        }
+      ]
+    },
+    {
+      "id": "W2",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 12,
+          "col": "a"
+        },
+        {
+          "row": 12,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    },
+    {
+      "id": "R2",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 11,
+          "col": "c"
+        },
+        {
+          "row": 18,
+          "col": "c"
+        }
+      ],
+      "value": 10000.0
+    },
+    {
+      "id": "SW1",
+      "kind": "button",
+      "legs": [
+        {
+          "row": 18,
+          "col": "d"
+        },
+        {
+          "row": 22,
+          "col": "d"
+        }
+      ]
+    },
+    {
+      "id": "W3",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 22,
+          "col": "a"
+        },
+        {
+          "row": 22,
+          "col": "L+"
+        }
+      ],
+      "color": "red"
+    }
+  ],
+  "expect": {
+    "pass": true,
+    "fault_parts": []
+  }
+}

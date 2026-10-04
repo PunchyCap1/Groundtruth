@@ -1,0 +1,100 @@
+{
+  "name": "Button + LED",
+  "description": "Press SW1 (select it, hold Space) to light the LED.",
+  "rows": 30,
+  "parts": [
+    {
+      "id": "B1",
+      "kind": "battery",
+      "legs": [
+        {
+          "row": 1,
+          "col": "L+"
+        },
+        {
+          "row": 1,
+          "col": "L-"
+        }
+      ],
+      "value": 5.0
+    },
+    {
+      "id": "W1",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 5,
+          "col": "L+"
+        },
+        {
+          "row": 5,
+          "col": "a"
+        }
+      ],
+      "color": "red"
+    },
+    {
+      "id": "SW1",
+      "kind": "button",
+      "legs": [
+        {
+          "row": 5,
+          "col": "c"
+        },
+        {
+          "row": 8,
+          "col": "c"
+        }
+      ]
+    },
+    {
+      "id": "R1",
+      "kind": "resistor",
+      "legs": [
+        {
+          "row": 8,
+          "col": "e"
+        },
+        {
+          "row": 14,
+          "col": "e"
+        }
+      ],
+      "value": 330.0
+    },
+    {
+      "id": "LED1",
+      "kind": "led",
+      "legs": [
+        {
+          "row": 14,
+          "col": "c"
+        },
+        {
+          "row": 15,
+          "col": "c"
+        }
+      ],
+      "color": "green"
+    },
+    {
+      "id": "W2",
+      "kind": "wire",
+      "legs": [
+        {
+          "row": 15,
+          "col": "a"
+        },
+        {
+          "row": 15,
+          "col": "L-"
+        }
+      ],
+      "color": "black"
+    }
+  ],
+  "expect": {
+    "pass": true,
+    "fault_parts": []
+  }
+}
