@@ -1,0 +1,9 @@
+/target
+
+# secrets - never commit your Gemini key
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
