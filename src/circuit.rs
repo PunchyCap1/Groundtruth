@@ -386,6 +386,10 @@ pub fn examples() -> Vec<Circuit> {
         include_str!("../circuits/button_led.json"),
         include_str!("../circuits/pot_dimmer.json"),
         include_str!("../circuits/transistor_switch.json"),
+        include_str!("../circuits/voltage_divider.json"),
+        include_str!("../circuits/led_no_resistor.json"),
+        include_str!("../circuits/battery_short.json"),
+        include_str!("../circuits/two_leds_parallel.json"),
     ]
     .iter()
     .map(|s| serde_json::from_str(s).expect("built-in example parses"))
@@ -461,4 +465,38 @@ mod tests {
         assert_eq!(c.add(Kind::Led, at), None);
         assert_eq!(c.add(Kind::Led, Hole { row: 5, col: Col::D }).as_deref(), Some("LED1"));
     }
+
+
+    #[test]
+    #[ignore]
+    fn dump_example_findings() {
+        use crate::sim::{Severity, ngspice::Ngspice};
+        // Loads .env first, exactly like the app does.
+        let ng = Ngspice { binary: crate::Config::from_env().ngspice };
+        println!("ngspice binary: {:?}", ng.binary);
+        for c in examples() {
+            let out = crate::sim::run(&c, &ng);
+            println!("== {} (expect: {:?})", c.name, c.expect);
+            if let Some(e) = &out.error {
+                println!("   sim error: {}", e.lines().next().unwrap_or(""));
+            }
+            if let Some(checks) = &out.checks {
+                println!("   pass: {}", checks.pass);
+                for f in &checks.findings {
+                    let tag = match f.severity {
+                        Severity::Fault => "FAULT",
+                        Severity::Warning => "WARN",
+                        Severity::Info => "INFO",
+                        Severity::Ok => "OK",
+                    };
+                    println!("   {tag:<5} {}: {}", f.part, f.headline);
+                }
+            }
+        }
+    }
+
 }
+
+
+
+

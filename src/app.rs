@@ -255,19 +255,19 @@ impl App {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let typing = ctx.text_edit_focused();
-        let (undo, redo, save, save_as, open, new) = ctx.input_mut(|i| {
+        let (redo, undo, save_as, save, open, new) = ctx.input_mut(|i| {
             (
-                i.consume_key(Modifiers::COMMAND, Key::Z),
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y),
-                i.consume_key(Modifiers::COMMAND, Key::S),
+                !typing && (i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y)),
+                !typing && i.consume_key(Modifiers::COMMAND, Key::Z),
                 i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::S),
+                i.consume_key(Modifiers::COMMAND, Key::S),
                 i.consume_key(Modifiers::COMMAND, Key::O),
                 i.consume_key(Modifiers::COMMAND, Key::N),
             )
         });
         if redo {
             self.pending = Some(Cmd::Redo);
-        } else if undo && !typing {
+        } else if undo {
             self.pending = Some(Cmd::Undo);
         }
         if save_as {
@@ -294,7 +294,7 @@ impl App {
             return;
         }
         let (del, flip, esc) = ctx.input(|i| {
-            (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace), i.key_pressed(Key::R), i.key_pressed(Key::Escape))
+            (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace), pressed_once(i, Key::R), i.key_pressed(Key::Escape))
         });
         if let Some(id) = self.editor.selected.clone() {
             if del {
@@ -312,7 +312,7 @@ impl App {
         // 1–9 drop the matching palette part into the first free spot.
         let keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9];
         for (k, kind) in keys.iter().zip(Kind::ALL) {
-            if ctx.input(|i| i.key_pressed(*k) && i.modifiers.is_none()) {
+            if ctx.input(|i| pressed_once(i, *k)) {
                 match self.circuit.add_anywhere(kind) {
                     Some(id) => self.editor.selected = Some(id),
                     None => self.say(ctx, "The board is full."),
@@ -473,8 +473,9 @@ impl App {
         };
         if let (Some(unit), Some(v)) = (part.kind.unit(), part.value) {
             // Free-typed value with SI suffixes, plus common presets.
-            if self.value_text.0 != part.id {
-                self.value_text = (part.id.clone(), fmt_si(v, unit));
+            let key = format!("{}@{v}", part.id);
+            if self.value_text.0 != key {
+                self.value_text = (key, fmt_si(v, unit));
             }
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Value").color(theme::DIM));
@@ -885,6 +886,14 @@ fn issue_card(ui: &mut egui::Ui, issue: &Issue, selected: &mut Option<String>) -
 
 fn tool_button(ui: &mut egui::Ui, text: &str, hint: &str) -> egui::Response {
     ui.add(egui::Button::new(RichText::new(text).font(FontId::monospace(12.0)))).on_hover_text(hint)
+}
+
+/// True on the initial press of `key` with no modifiers, ignoring key-repeat.
+fn pressed_once(i: &egui::InputState, key: Key) -> bool {
+    i.events.iter().any(|e| {
+        matches!(e, egui::Event::Key { key: k, pressed: true, repeat: false, modifiers, .. }
+            if *k == key && modifiers.is_none())
+    })
 }
 
 fn chip(ui: &mut egui::Ui, key: &str, value: &str, color: Color32) {
