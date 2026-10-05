@@ -21,14 +21,31 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
+        // `cargo run` finds `.env` in the working directory. A double-clicked .app starts in `/`,
+        // so also look in the per-user settings folder and in the checkout the app was built from.
+        // Earlier files win; none of them override variables that are already set.
         let _ = dotenvy::dotenv();
+        if let Some(home) = std::env::var_os("HOME") {
+            let _ = dotenvy::from_path(std::path::Path::new(&home).join("Library/Application Support/Groundtruth/.env"));
+        }
+        let _ = dotenvy::from_path(concat!(env!("CARGO_MANIFEST_DIR"), "/.env"));
+
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         Self {
             gemini_api_key: var("GEMINI_API_KEY"),
             gemini_model: var("GEMINI_MODEL").unwrap_or_else(|| GEMINI_MODELS[0].into()),
-            ngspice: var("NGSPICE_PATH").unwrap_or_else(|| "ngspice".into()),
+            ngspice: var("NGSPICE_PATH").unwrap_or_else(find_ngspice),
         }
     }
+}
+
+/// Apps opened from Finder get a bare PATH without Homebrew, so check its usual install paths.
+fn find_ngspice() -> String {
+    ["/opt/homebrew/bin/ngspice", "/usr/local/bin/ngspice"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .unwrap_or("ngspice")
+        .into()
 }
 
 fn main() -> eframe::Result {
